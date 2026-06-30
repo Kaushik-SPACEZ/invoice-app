@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build output
+frontend/dist/
+frontend/.vite/
+
+# Environment files — NEVER commit these (contain API keys, DB passwords)
+mock-api/.env
+backend/.env
+.env
+.env.local
+.env.production
+
+# Uploaded files
+mock-api/uploads/
+
+# Laravel cache/storage
+backend/storage/app/invoices/
+backend/storage/logs/
+backend/bootstrap/cache/*.php
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/sftp.json
