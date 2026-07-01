@@ -10,61 +10,72 @@ use Illuminate\Support\Facades\Storage;
 
 class InvoiceProcessingService
 {
-    // Processing stages stored in a JSON column so frontend can poll granular progress
-    private const STAGES = [
-        'ocr_extraction'   => ['label' => 'Reading Invoice',    'progress' => 20],
-        'llm_extraction'   => ['label' => 'Extracting Data',    'progress' => 50],
-        'validation'       => ['label' => 'Checking GST',       'progress' => 70],
-        'saving_items'     => ['label' => 'Saving Line Items',  'progress' => 85],
-        'completed'        => ['label' => 'Done',               'progress' => 100],
+    private const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+
+    private const VISION_MODELS = [
+        'meta-llama/llama-4-scout-17b-16e-instruct',
+        'llama-3.2-11b-vision-preview',
+        'llama-3.2-90b-vision-preview',
+    ];
+
+    private const TEXT_MODELS = [
+        'llama-3.1-8b-instant',
+        'gemma2-9b-it',
+        'llama-3.3-70b-versatile',
     ];
 
     public function processInvoice(Invoice $invoice): void
     {
         try {
-            // ── Stage 1: OCR ──────────────────────────────────────────────
-            $this->updateStage($invoice, 'ocr_extraction');
-            $rawText = $this->extractWithOCR($invoice->file_path, $invoice->file_type);
+            $this->updateStage($invoice, 'ocr_extraction', 20, 'Reading Invoice');
 
-            // ── Stage 2: LLM extraction ──────────────────────────────────
-            $this->updateStage($invoice, 'llm_extraction');
-            $extracted = $this->extractWithLLM($rawText, $invoice->marketplace);
+            $fullPath = storage_path('app/' . $invoice->file_path);
+            $isImage  = in_array($invoice->file_type, ['jpg', 'jpeg', 'png']);
 
-            // ── Stage 3: Validate ─────────────────────────────────────────
-            $this->updateStage($invoice, 'validation');
-            $validated = $this->validateExtractedData($extracted);
-            $score = $this->calculateConfidenceScore($validated);
+            if ($isImage) {
+                // Send image directly to Groq Vision
+                $this->updateStage($invoice, 'llm_extraction', 50, 'Extracting Data');
+                $extracted = $this->extractFromImageWithGroq($fullPath, $invoice->file_type, $invoice->marketplace);
+            } else {
+                // PDF: extract text first, then send to text LLM
+                $text = $this->extractTextFromPDF($fullPath);
+                $this->updateStage($invoice, 'llm_extraction', 50, 'Extracting Data');
+                $extracted = $this->extractFromTextWithGroq($text, $invoice->marketplace);
+            }
 
-            // ── Stage 4: Persist line items ───────────────────────────────
-            $this->updateStage($invoice, 'saving_items');
+            // Validate and recalculate
+            $this->updateStage($invoice, 'validation', 70, 'Checking GST');
+            $validated = $this->validateExtracted($extracted);
+            $score     = $this->calculateConfidence($validated);
+
+            // Save line items
+            $this->updateStage($invoice, 'saving_items', 85, 'Saving Line Items');
             $invoice->lineItems()->delete();
             foreach ($validated['line_items'] ?? [] as $item) {
                 InvoiceLineItem::create(array_merge(
-                    $this->mapLineItemFields($item),
+                    $this->mapLineItem($item),
                     ['invoice_id' => $invoice->id]
                 ));
             }
 
-            // ── Stage 5: Done ─────────────────────────────────────────────
+            // Mark ready for review
             $invoice->update([
-                'invoice_number'     => $validated['invoice_number'] ?? null,
-                'invoice_date'       => $validated['invoice_date'] ?? null,
-                'vendor_name'        => $validated['vendor_name'] ?? null,
-                'vendor_gstin'       => $validated['vendor_gstin'] ?? null,
-                'subtotal'           => $validated['subtotal'] ?? 0,
-                'tax_amount'         => $validated['tax_amount'] ?? 0,
-                'total_amount'       => $validated['total_amount'] ?? 0,
-                'extracted_data'     => $validated,
-                'ai_confidence_score'=> $score,
-                'processing_status'  => 'review',
-                'processed_at'       => now(),
-                'error_message'      => null,
+                'invoice_number'      => $validated['invoice_number'] ?? null,
+                'invoice_date'        => $validated['invoice_date'] ?? null,
+                'vendor_name'         => $validated['vendor_name'] ?? null,
+                'vendor_gstin'        => $validated['vendor_gstin'] ?? null,
+                'subtotal'            => $validated['subtotal'] ?? 0,
+                'tax_amount'          => $validated['tax_amount'] ?? 0,
+                'total_amount'        => $validated['total_amount'] ?? 0,
+                'extracted_data'      => $validated,
+                'ai_confidence_score' => $score,
+                'processing_status'   => 'review',
+                'error_message'       => null,
+                'processed_at'        => now(),
             ]);
 
         } catch (\Exception $e) {
-            Log::error("Invoice #{$invoice->id} processing failed: " . $e->getMessage(), [
-                'trace' => $e->getTraceAsString(),
-            ]);
+            Log::error("Invoice #{$invoice->id} processing failed: " . $e->getMessage());
             $invoice->update([
                 'processing_status' => 'error',
                 'error_message'     => $e->getMessage(),
@@ -73,252 +84,197 @@ class InvoiceProcessingService
         }
     }
 
-    // ── OCR ──────────────────────────────────────────────────────────────────
+    // ── Image extraction via Groq Vision ─────────────────────────────────────
 
-    private function extractWithOCR(string $filePath, string $fileType): string
+    private function extractFromImageWithGroq(string $filePath, string $fileType, string $marketplace): array
     {
-        $fullPath = Storage::path($filePath);
+        $base64  = base64_encode(file_get_contents($filePath));
+        $imgMime = $fileType === 'png' ? 'image/png' : 'image/jpeg';
 
-        // Try pdftotext for PDFs first (fastest, most accurate)
-        if ($fileType === 'pdf') {
-            $text = $this->runPdfToText($fullPath);
-            if (!empty(trim($text))) return $text;
+        $prompt = $this->buildExtractionPrompt($marketplace);
+
+        $payload = [
+            'messages' => [
+                ['role' => 'system', 'content' => 'You are an expert Indian invoice data extractor. Return ONLY valid JSON, no markdown.'],
+                ['role' => 'user', 'content' => [
+                    ['type' => 'image_url', 'image_url' => ['url' => "data:{$imgMime};base64,{$base64}"]],
+                    ['type' => 'text', 'text' => $prompt],
+                ]],
+            ],
+            'temperature' => 0,
+            'max_tokens'  => 2500,
+        ];
+
+        return $this->callGroq(self::VISION_MODELS, $payload);
+    }
+
+    // ── Text extraction via Groq LLM ─────────────────────────────────────────
+
+    private function extractFromTextWithGroq(string $text, string $marketplace): array
+    {
+        $prompt = $this->buildExtractionPrompt($marketplace, $text);
+
+        $payload = [
+            'messages' => [
+                ['role' => 'system', 'content' => 'You are an expert Indian invoice data extractor. Return ONLY valid JSON, no markdown.'],
+                ['role' => 'user', 'content' => $prompt],
+            ],
+            'temperature' => 0,
+            'max_tokens'  => 2500,
+        ];
+
+        return $this->callGroq(self::TEXT_MODELS, $payload);
+    }
+
+    // ── Groq API call with model fallback ────────────────────────────────────
+
+    private function callGroq(array $models, array $payload): array
+    {
+        $apiKey    = env('GROQ_API_KEY');
+        $lastError = null;
+
+        foreach ($models as $model) {
+            try {
+                Log::info("Groq: trying model {$model}");
+                $response = Http::timeout(45)
+                    ->withHeaders(['Authorization' => "Bearer {$apiKey}", 'Content-Type' => 'application/json'])
+                    ->post(self::GROQ_API_URL, array_merge($payload, ['model' => $model]));
+
+                if (!$response->successful()) {
+                    $body = $response->body();
+                    if (str_contains($body, 'rate_limit') || $response->status() === 429) {
+                        Log::warning("Groq model {$model} rate limited, trying next");
+                        $lastError = $body;
+                        continue;
+                    }
+                    throw new \RuntimeException("Groq API error ({$response->status()}): {$body}");
+                }
+
+                $raw     = $response->json('choices.0.message.content', '{}');
+                $cleaned = preg_replace('/^```json\s*/i', '', trim($raw));
+                $cleaned = preg_replace('/\s*```$/', '', $cleaned);
+                $decoded = json_decode($cleaned, true);
+
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    Log::warning("Groq JSON parse error for model {$model}. Raw: " . substr($raw, 0, 200));
+                    continue;
+                }
+
+                Log::info("Groq success with {$model}: invoice={$decoded['invoice_number']}, items=" . count($decoded['line_items'] ?? []));
+                return $decoded;
+
+            } catch (\RuntimeException $e) {
+                throw $e;
+            } catch (\Exception $e) {
+                $lastError = $e->getMessage();
+                Log::warning("Groq model {$model} failed: {$lastError}");
+            }
         }
 
-        // For images or scanned PDFs: convert to PNG then run Tesseract
-        $pngPath = $this->ensurePng($fullPath, $fileType);
-        $text = $this->runTesseract($pngPath);
-
-        if ($pngPath !== $fullPath) @unlink($pngPath);
-
-        if (empty(trim($text))) {
-            throw new \RuntimeException('OCR produced no text. Is the file readable?');
-        }
-
-        return $text;
+        throw new \RuntimeException('All Groq models failed. ' . ($lastError ?? ''));
     }
 
-    private function runPdfToText(string $path): string
+    // ── PDF text extraction ──────────────────────────────────────────────────
+
+    private function extractTextFromPDF(string $filePath): string
     {
-        $escaped = escapeshellarg($path);
-        // pdftotext outputs to stdout with '-' as output file
-        $output = shell_exec("pdftotext -layout {$escaped} - 2>/dev/null");
-        return $output ?? '';
+        // Try pdftotext (available on most Linux servers)
+        $escaped = escapeshellarg($filePath);
+        $text    = shell_exec("pdftotext -layout {$escaped} - 2>/dev/null");
+        if (!empty(trim($text ?? ''))) return $text;
+
+        // Fallback: return empty — will be handled as image if possible
+        return '';
     }
 
-    private function ensurePng(string $path, string $fileType): string
+    // ── Extraction prompt ────────────────────────────────────────────────────
+
+    private function buildExtractionPrompt(string $marketplace, string $text = ''): string
     {
-        if (in_array($fileType, ['jpg', 'jpeg', 'png'])) return $path;
-
-        // PDF → PNG via ImageMagick (for scanned PDFs)
-        $tmpPng = sys_get_temp_dir() . '/inv_' . uniqid() . '.png';
-        $escaped = escapeshellarg($path);
-        $escapedOut = escapeshellarg($tmpPng);
-        exec("convert -density 200 {$escaped}[0] -quality 90 {$escapedOut} 2>/dev/null");
-        return file_exists($tmpPng) ? $tmpPng : $path;
-    }
-
-    private function runTesseract(string $imagePath): string
-    {
-        $outBase = sys_get_temp_dir() . '/ocr_' . uniqid();
-        $escaped = escapeshellarg($imagePath);
-        $escapedOut = escapeshellarg($outBase);
-        // Run with English + OSD, best page segmentation for invoices
-        exec("tesseract {$escaped} {$escapedOut} -l eng --psm 6 2>/dev/null");
-        $result = @file_get_contents($outBase . '.txt') ?: '';
-        @unlink($outBase . '.txt');
-        return $result;
-    }
-
-    // ── LLM ──────────────────────────────────────────────────────────────────
-
-    private function extractWithLLM(string $ocrText, string $marketplace): array
-    {
-        // Trim to ~6000 chars to stay within token limits
-        $trimmedText = mb_substr($ocrText, 0, 6000);
-        $prompt = $this->buildExtractionPrompt($trimmedText, $marketplace);
-
-        $response = Http::timeout(45)
-            ->withHeaders([
-                'Authorization' => 'Bearer ' . config('services.openai.key'),
-                'Content-Type'  => 'application/json',
-            ])
-            ->post('https://api.openai.com/v1/chat/completions', [
-                'model'       => config('services.openai.model', 'gpt-4o-mini'),
-                'messages'    => [
-                    ['role' => 'system', 'content' => 'You are an expert Indian invoice data extractor. Return ONLY valid JSON with no markdown or explanation.'],
-                    ['role' => 'user',   'content' => $prompt],
-                ],
-                'max_tokens'  => 2500,
-                'temperature' => 0.0,  // zero temp for deterministic extraction
-                'response_format' => ['type' => 'json_object'],
-            ]);
-
-        if (!$response->successful()) {
-            $body = $response->body();
-            Log::error("OpenAI API error: {$body}");
-            throw new \RuntimeException("LLM extraction failed (HTTP {$response->status()}): {$body}");
-        }
-
-        $content = $response->json('choices.0.message.content', '{}');
-        $decoded = json_decode($content, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
-            Log::warning("LLM returned invalid JSON: {$content}");
-            // Return an empty shell so we can still store partial data
-            $decoded = ['invoice_number' => null, 'line_items' => [], 'field_confidence' => []];
-        }
-
-        return $decoded;
-    }
-
-    private function buildExtractionPrompt(string $text, string $marketplace): string
-    {
-        $marketplaceHint = match ($marketplace) {
-            'amazon'   => 'This is an Amazon India seller invoice. Invoice numbers usually start with "IN-" or contain alphanumeric codes.',
-            'flipkart' => 'This is a Flipkart seller invoice. Look for Flipkart-specific fields like seller ID.',
-            'meesho'   => 'This is a Meesho seller invoice.',
-            default    => 'This is an Indian e-commerce invoice.',
+        $hint = match ($marketplace) {
+            'amazon'   => 'Amazon India seller invoice.',
+            'flipkart' => 'Flipkart seller invoice.',
+            'meesho'   => 'Meesho seller invoice.',
+            default    => 'Indian e-commerce invoice.',
         };
 
-        return <<<PROMPT
-{$marketplaceHint}
+        $textSection = $text ? "\nInvoice text:\n---\n" . mb_substr($text, 0, 5000) . "\n---\n" : '';
 
-Extract ALL structured data from this invoice text and return a single JSON object.
+        return "{$hint}{$textSection}
 
-For each extracted field, assign a confidence score (0-100):
-- 95-100: clearly visible, unambiguous
-- 80-94: likely correct but minor uncertainty
-- 50-79: partially readable or inferred
-- 0-49: very uncertain or missing
-
-Invoice text:
----
-{$text}
----
-
-Return this exact JSON structure. Use null for missing string fields, 0 for missing numbers:
+Extract all data. Return ONLY this JSON (null for missing, 0 for missing numbers):
 {
-  "invoice_number": "string|null",
-  "invoice_date": "YYYY-MM-DD|null",
-  "vendor_name": "string|null",
-  "vendor_gstin": "string|null",
-  "customer_name": "string|null",
-  "customer_gstin": "string|null",
-  "customer_address": "string|null",
-  "line_items": [
-    {
-      "sku": "string|null",
-      "product_name": "string",
-      "hsn_code": "string|null",
-      "quantity": 1,
-      "unit_price": 0.00,
-      "discount": 0.00,
-      "taxable_value": 0.00,
-      "cgst_rate": 0, "cgst_amount": 0.00,
-      "sgst_rate": 0, "sgst_amount": 0.00,
-      "igst_rate": 0, "igst_amount": 0.00,
-      "total_amount": 0.00,
-      "confidence_score": 85
-    }
-  ],
-  "shipping_charges": 0.00,
-  "commission_amount": 0.00,
-  "packaging_charges": 0.00,
-  "subtotal": 0.00,
-  "tax_amount": 0.00,
-  "total_amount": 0.00,
-  "field_confidence": {
-    "invoice_number": 0,
-    "invoice_date": 0,
-    "vendor_name": 0,
-    "vendor_gstin": 0,
-    "customer_name": 0,
-    "line_items": 0,
-    "totals": 0
+  \"invoice_number\": null,
+  \"invoice_date\": \"YYYY-MM-DD or null\",
+  \"vendor_name\": null,
+  \"vendor_gstin\": null,
+  \"customer_name\": null,
+  \"customer_gstin\": null,
+  \"customer_address\": null,
+  \"line_items\": [{
+    \"sku\": null, \"product_name\": \"string\", \"hsn_code\": null,
+    \"quantity\": 1, \"unit_price\": 0, \"discount\": 0, \"taxable_value\": 0,
+    \"cgst_rate\": 0, \"cgst_amount\": 0,
+    \"sgst_rate\": 0, \"sgst_amount\": 0,
+    \"igst_rate\": 0, \"igst_amount\": 0,
+    \"total_amount\": 0, \"confidence_score\": 85
+  }],
+  \"shipping_charges\": 0, \"commission_amount\": 0,
+  \"subtotal\": 0, \"tax_amount\": 0, \"total_amount\": 0,
+  \"field_confidence\": {
+    \"invoice_number\": 80, \"invoice_date\": 80, \"vendor_name\": 80,
+    \"vendor_gstin\": 80, \"customer_name\": 80, \"line_items\": 80, \"totals\": 80
   }
-}
-PROMPT;
+}";
     }
 
-    // ── Validation ────────────────────────────────────────────────────────────
+    // ── Validation ───────────────────────────────────────────────────────────
 
-    private function validateExtractedData(array $data): array
+    private function validateExtracted(array $data): array
     {
-        // Validate GSTIN format: 2-digit state + 10-char PAN + entity + Z + checksum
-        $gstinPattern = '/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/';
-
+        // Normalize GSTIN
         if (!empty($data['vendor_gstin'])) {
             $data['vendor_gstin'] = strtoupper(trim($data['vendor_gstin']));
-            if (!preg_match($gstinPattern, $data['vendor_gstin'])) {
-                $data['field_confidence']['vendor_gstin'] = min(
-                    $data['field_confidence']['vendor_gstin'] ?? 80, 45
-                );
+            if (!preg_match('/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/', $data['vendor_gstin'])) {
+                if (isset($data['field_confidence']['vendor_gstin'])) {
+                    $data['field_confidence']['vendor_gstin'] = min($data['field_confidence']['vendor_gstin'], 45);
+                }
             }
         }
 
-        if (!empty($data['customer_gstin'])) {
-            $data['customer_gstin'] = strtoupper(trim($data['customer_gstin']));
-            if (!preg_match($gstinPattern, $data['customer_gstin'])) {
-                $data['customer_gstin'] = null;
+        // Normalize confidence scores (model may return 0-1 instead of 0-100)
+        $scores = array_values($data['field_confidence'] ?? []);
+        if (!empty($scores) && max($scores) <= 1) {
+            foreach ($data['field_confidence'] as $k => $v) {
+                $data['field_confidence'][$k] = round($v * 100);
+            }
+            foreach ($data['line_items'] ?? [] as &$item) {
+                if (isset($item['confidence_score']) && $item['confidence_score'] <= 1) {
+                    $item['confidence_score'] = round($item['confidence_score'] * 100);
+                }
             }
         }
 
-        // Validate and recalculate line item math
+        // Recalculate line item totals
         $recalcSubtotal = 0;
-        $recalcTax = 0;
+        $recalcTax      = 0;
         foreach ($data['line_items'] ?? [] as &$item) {
-            $item['quantity']    = max(0, (float) ($item['quantity'] ?? 0));
-            $item['unit_price']  = max(0, (float) ($item['unit_price'] ?? 0));
-            $item['discount']    = max(0, (float) ($item['discount'] ?? 0));
-
-            $expectedTaxable = round($item['quantity'] * $item['unit_price'] - $item['discount'], 2);
-            if (isset($item['taxable_value']) && abs($expectedTaxable - $item['taxable_value']) > 2) {
-                // LLM may have gotten quantity/price slightly wrong — trust taxable_value
-                $item['confidence_score'] = min((int)($item['confidence_score'] ?? 80), 72);
-            } else {
-                $item['taxable_value'] = $expectedTaxable;
+            $item['quantity']    = max(0, (float)($item['quantity'] ?? 0));
+            $item['unit_price']  = max(0, (float)($item['unit_price'] ?? 0));
+            $item['discount']    = max(0, (float)($item['discount'] ?? 0));
+            if (!isset($item['taxable_value']) || $item['taxable_value'] == 0) {
+                $item['taxable_value'] = round($item['quantity'] * $item['unit_price'] - $item['discount'], 2);
             }
-
-            // Determine intra vs inter-state from GSTIN state codes
-            $vendorState   = substr($data['vendor_gstin'] ?? '00', 0, 2);
-            $customerState = substr($data['customer_gstin'] ?? '00', 0, 2);
-            $isInterState  = $vendorState !== '00' && $customerState !== '00' && $vendorState !== $customerState;
-
-            if ($isInterState) {
-                // IGST only
-                $igstRate  = (float)($item['igst_rate'] ?? ($item['cgst_rate'] ?? 0) * 2);
-                $igstAmt   = round($item['taxable_value'] * $igstRate / 100, 2);
-                $item['cgst_rate'] = 0; $item['cgst_amount'] = 0;
-                $item['sgst_rate'] = 0; $item['sgst_amount'] = 0;
-                $item['igst_rate'] = $igstRate;
-                $item['igst_amount'] = $igstAmt;
-            } else {
-                // CGST + SGST
-                $cgstRate = (float)($item['cgst_rate'] ?? 0);
-                $sgstRate = (float)($item['sgst_rate'] ?? $cgstRate);
-                $item['cgst_amount'] = round($item['taxable_value'] * $cgstRate / 100, 2);
-                $item['sgst_amount'] = round($item['taxable_value'] * $sgstRate / 100, 2);
-                $item['igst_rate'] = 0; $item['igst_amount'] = 0;
-            }
-
-            $itemTax = $item['cgst_amount'] + $item['sgst_amount'] + $item['igst_amount'];
+            $itemTax = (float)($item['cgst_amount'] ?? 0) + (float)($item['sgst_amount'] ?? 0) + (float)($item['igst_amount'] ?? 0);
             $item['total_amount'] = round($item['taxable_value'] + $itemTax, 2);
             $recalcSubtotal += $item['taxable_value'];
             $recalcTax      += $itemTax;
         }
         unset($item);
 
-        // Cross-check totals — if LLM total diverges >5% use recalculated
-        $llmTotal = (float)($data['total_amount'] ?? 0);
-        $calcTotal = round($recalcSubtotal + $recalcTax, 2);
-        if ($calcTotal > 0 && abs($llmTotal - $calcTotal) / $calcTotal > 0.05) {
-            $data['subtotal']     = round($recalcSubtotal, 2);
-            $data['tax_amount']   = round($recalcTax, 2);
-            $data['total_amount'] = $calcTotal;
-            // Lower confidence on totals
-            $data['field_confidence']['totals'] = min($data['field_confidence']['totals'] ?? 80, 65);
-        }
+        if (!$data['subtotal'] && $recalcSubtotal > 0)  $data['subtotal']     = round($recalcSubtotal, 2);
+        if (!$data['tax_amount'] && $recalcTax > 0)     $data['tax_amount']   = round($recalcTax, 2);
+        if (!$data['total_amount'])                      $data['total_amount'] = round(($data['subtotal'] ?? 0) + ($data['tax_amount'] ?? 0), 2);
 
         // Normalize date
         if (!empty($data['invoice_date'])) {
@@ -326,52 +282,45 @@ PROMPT;
                 $data['invoice_date'] = \Carbon\Carbon::parse($data['invoice_date'])->format('Y-m-d');
             } catch (\Exception $e) {
                 $data['invoice_date'] = null;
-                $data['field_confidence']['invoice_date'] = 20;
             }
         }
 
         return $data;
     }
 
-    private function calculateConfidenceScore(array $data): float
+    private function calculateConfidence(array $data): float
     {
         $scores = array_values($data['field_confidence'] ?? []);
         if (empty($scores)) return 70.0;
-        // Weighted: penalise heavier if critical fields (invoice_number, totals) are low
         return round(array_sum($scores) / count($scores), 1);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private function mapLineItemFields(array $item): array
+    private function mapLineItem(array $item): array
     {
         return [
-            'sku'             => $item['sku'] ?? null,
-            'product_name'    => $item['product_name'] ?? 'Unknown Product',
-            'hsn_code'        => $item['hsn_code'] ?? null,
-            'quantity'        => $item['quantity'] ?? 1,
-            'unit_price'      => $item['unit_price'] ?? 0,
-            'discount'        => $item['discount'] ?? 0,
-            'taxable_value'   => $item['taxable_value'] ?? 0,
-            'cgst_rate'       => $item['cgst_rate'] ?? 0,
-            'cgst_amount'     => $item['cgst_amount'] ?? 0,
-            'sgst_rate'       => $item['sgst_rate'] ?? 0,
-            'sgst_amount'     => $item['sgst_amount'] ?? 0,
-            'igst_rate'       => $item['igst_rate'] ?? 0,
-            'igst_amount'     => $item['igst_amount'] ?? 0,
-            'total_amount'    => $item['total_amount'] ?? 0,
-            'confidence_score'=> $item['confidence_score'] ?? null,
+            'sku'              => $item['sku'] ?? null,
+            'product_name'     => $item['product_name'] ?? 'Unknown Product',
+            'hsn_code'         => $item['hsn_code'] ?? null,
+            'quantity'         => $item['quantity'] ?? 1,
+            'unit_price'       => $item['unit_price'] ?? 0,
+            'discount'         => $item['discount'] ?? 0,
+            'taxable_value'    => $item['taxable_value'] ?? 0,
+            'cgst_rate'        => $item['cgst_rate'] ?? 0,
+            'cgst_amount'      => $item['cgst_amount'] ?? 0,
+            'sgst_rate'        => $item['sgst_rate'] ?? 0,
+            'sgst_amount'      => $item['sgst_amount'] ?? 0,
+            'igst_rate'        => $item['igst_rate'] ?? 0,
+            'igst_amount'      => $item['igst_amount'] ?? 0,
+            'total_amount'     => $item['total_amount'] ?? 0,
+            'confidence_score' => $item['confidence_score'] ?? null,
         ];
     }
 
-    private function updateStage(Invoice $invoice, string $stage): void
+    private function updateStage(Invoice $invoice, string $stage, int $progress, string $label): void
     {
-        $info = self::STAGES[$stage] ?? ['label' => $stage, 'progress' => 50];
         $invoice->update([
             'processing_status' => 'processing',
-            // Reuse error_message column to store current stage temporarily
-            // (cleared on success)
-            'error_message' => json_encode(['stage' => $stage, 'progress' => $info['progress'], 'label' => $info['label']]),
+            'error_message'     => json_encode(['stage' => $stage, 'progress' => $progress, 'label' => $label]),
         ]);
     }
 }

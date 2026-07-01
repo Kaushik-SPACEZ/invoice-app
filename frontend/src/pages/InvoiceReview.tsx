@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
@@ -68,6 +68,22 @@ export default function InvoiceReview() {
     }
   }
 
+  // Load image as blob URL so JWT token is sent in the request
+  const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!invoice) return
+    const isImage = invoice.file_type && ['jpg', 'jpeg', 'png'].includes(invoice.file_type)
+    if (!isImage) return
+
+    invoicesApi.download(invoice.id).then((res) => {
+      const blob = new Blob([res.data], { type: String(res.headers['content-type'] || 'image/jpeg') })
+      setImageBlobUrl(URL.createObjectURL(blob))
+    }).catch(() => {})
+
+    return () => { if (imageBlobUrl) URL.revokeObjectURL(imageBlobUrl) }
+  }, [invoice?.id])
+
   // Determine file preview
   const fileUrl = invoice ? `/api/invoices/${invoice.id}/download` : null
 
@@ -93,13 +109,20 @@ export default function InvoiceReview() {
                 className="w-full h-full min-h-[500px]"
                 title="Invoice PDF"
               />
-            ) : invoice.file_type && ['jpg', 'jpeg', 'png'].includes(invoice.file_type) && fileUrl ? (
+            ) : invoice.file_type && ['jpg', 'jpeg', 'png'].includes(invoice.file_type) ? (
               <div className="flex items-center justify-center h-full p-4 overflow-auto">
-                <img
-                  src={fileUrl}
-                  alt="Invoice"
-                  className="max-w-full max-h-full object-contain rounded-lg"
-                />
+                {imageBlobUrl ? (
+                  <img
+                    src={imageBlobUrl}
+                    alt="Invoice"
+                    className="max-w-full max-h-full object-contain rounded-lg"
+                  />
+                ) : (
+                  <div className="flex flex-col items-center gap-3 text-gray-400">
+                    <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    <p className="text-sm">Loading image…</p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center h-full p-8 text-center">

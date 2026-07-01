@@ -1,0 +1,6 @@
+import{c as l,j as r,m as g,g as h}from"./index-OGEdyeYt.js";/**
+ * @license lucide-react v0.395.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const y=l("LoaderCircle",[["path",{d:"M21 12a9 9 0 1 1-6.219-8.56",key:"13zald"}]]),d=({variant:s="primary",size:o="md",loading:e,children:a,fullWidth:i,className:n,disabled:t,...c})=>{const p="inline-flex items-center justify-center gap-2 font-semibold rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/40 select-none",m={primary:"bg-gradient-primary text-white shadow-glow-sm hover:opacity-90",secondary:"border border-primary text-primary hover:bg-primary/10",ghost:"text-gray-300 hover:text-white hover:bg-white/5",danger:"bg-danger text-white hover:bg-red-600",success:"bg-gradient-success text-white"},x={sm:"text-xs px-3 py-1.5",md:"text-sm px-5 py-2.5",lg:"text-base px-7 py-3"};return r.jsxs(g.button,{whileHover:t||e?{}:{scale:1.02,boxShadow:"0 8px 25px rgba(99,102,241,0.4)"},whileTap:t||e?{}:{scale:.97},transition:{type:"spring",stiffness:400,damping:20},disabled:t||e,className:h(p,m[s],x[o],i&&"w-full",(t||e)&&"opacity-60 cursor-not-allowed",n),...c,children:[e&&r.jsx(y,{size:14,className:"animate-spin"}),a]})};export{d as B};

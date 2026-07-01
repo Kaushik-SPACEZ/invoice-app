@@ -57,11 +57,12 @@ export const StatusBadge = ({ status }: { status: string }) => {
   return <Badge variant={map[status] ?? 'muted'} dot>{status.charAt(0).toUpperCase() + status.slice(1)}</Badge>
 }
 
-export const ConfidenceBadge = ({ score }: { score: number }) => {
-  const { bg, text } = getConfidenceColor(score)
+export const ConfidenceBadge = ({ score }: { score: number | string | null | undefined }) => {
+  const numScore = Number(score) || 0
+  const { bg, text } = getConfidenceColor(numScore)
   return (
     <span className={cn('inline-flex items-center text-xs font-mono font-medium px-2 py-0.5 rounded-full border', bg, text, 'border-current/30')}>
-      {score.toFixed(0)}%
+      {numScore.toFixed(0)}%
     </span>
   )
 }
