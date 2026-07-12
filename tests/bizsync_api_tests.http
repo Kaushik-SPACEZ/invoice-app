@@ -1,0 +1,868 @@
+### BizSync API — Full Production Test Suite
+### Base URL: https://invoice.kynetropo.com/api
+### Run with: REST Client (VS Code) or httpyac
+###
+### Variables are set via responses — run in ORDER, top to bottom
+### ==============================================================
+
+@base = https://invoice.kynetropo.com/api
+@contentJson = Content-Type: application/json
+@accept = Accept: application/json
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 1 — AUTHENTICATION
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 1.1 [HAPPY] Login as Kaushik → get JWT
+# @name loginKaushik
+POST {{base}}/auth/login
+{{contentJson}}
+{{accept}}
+
+{
+  "email": "kaushik@kynetropo.com",
+  "password": "Kynetropo@2024"
+}
+
+###
+@tokenK = {{loginKaushik.response.body.data.access_token}}
+
+### 1.2 [HAPPY] Login as Raj → get JWT
+# @name loginRaj
+POST {{base}}/auth/login
+{{contentJson}}
+{{accept}}
+
+{
+  "email": "raj@rkelectronics.com",
+  "password": "password123"
+}
+
+###
+@tokenR = {{loginRaj.response.body.data.access_token}}
+
+### 1.3 [HAPPY] Get current user (Kaushik)
+GET {{base}}/auth/me
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 1.4 [SAD] Wrong password → 401
+POST {{base}}/auth/login
+{{contentJson}}
+{{accept}}
+
+{
+  "email": "kaushik@kynetropo.com",
+  "password": "wrongpassword"
+}
+
+### 1.5 [SAD] Unknown email → 401
+POST {{base}}/auth/login
+{{contentJson}}
+{{accept}}
+
+{
+  "email": "nobody@nowhere.com",
+  "password": "password123"
+}
+
+### 1.6 [EDGE] Missing fields → 422
+POST {{base}}/auth/login
+{{contentJson}}
+{{accept}}
+
+{
+  "email": "kaushik@kynetropo.com"
+}
+
+### 1.7 [EDGE] No token → 401
+GET {{base}}/auth/me
+{{accept}}
+
+### 1.8 [EDGE] Expired/garbage token → 401
+GET {{base}}/auth/me
+Authorization: Bearer garbage.token.here
+{{accept}}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 2 — INVENTORY / PRODUCTS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 2.1 [HAPPY] List all products (Kaushik)
+GET {{base}}/products
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 2.2 [HAPPY] Create product
+# @name createProduct
+POST {{base}}/products
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "sku": "TEST-SKU-001",
+  "name": "Test Abacus Kit",
+  "category": "Toys",
+  "hsn_code": "9503",
+  "unit": "pcs",
+  "cost_price": 150,
+  "selling_price": 299,
+  "current_stock": 50,
+  "min_stock_level": 5
+}
+
+###
+@productId = {{createProduct.response.body.data.id}}
+
+### 2.3 [HAPPY] Get single product
+GET {{base}}/products/{{productId}}
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 2.4 [SAD] Duplicate SKU → 422
+POST {{base}}/products
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "sku": "TEST-SKU-001",
+  "name": "Another Product",
+  "selling_price": 100,
+  "current_stock": 10
+}
+
+### 2.5 [SAD] Missing required fields → 422
+POST {{base}}/products
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "category": "Toys"
+}
+
+### 2.6 [EDGE] Stock filter — low stock
+GET {{base}}/products?stock_level=low
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 2.7 [EDGE] Stock filter — zero stock
+GET {{base}}/products?stock_level=zero
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 2.8 [EDGE] Category filter
+GET {{base}}/products?category=Toys
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 2.9 [EDGE] Search by SKU
+GET {{base}}/products?search=TEST-SKU
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 2.10 [EDGE] Low stock endpoint
+GET {{base}}/products/low-stock
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 2.11 [EDGE] Raj cannot see Kaushik's products
+GET {{base}}/products/{{productId}}
+Authorization: Bearer {{tokenR}}
+{{accept}}
+
+### 2.12 [HAPPY] Update product (set low stock to trigger alert)
+PUT {{base}}/products/{{productId}}
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "current_stock": 3,
+  "min_stock_level": 5
+}
+
+### 2.13 Verify low-stock now appears
+GET {{base}}/products/low-stock
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 2.14 Restore stock to 50
+PUT {{base}}/products/{{productId}}
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "current_stock": 50
+}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 3 — PRODUCT MAPPINGS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 3.1 [HAPPY] List all mappings
+GET {{base}}/product-mappings
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 3.2 [HAPPY] Create mapping: "Test Abacus Kit" → TEST-SKU-001
+# @name createMapping
+POST {{base}}/product-mappings
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "invoice_product_name": "15 ROD MULTICOLOR ABACUS KIT",
+  "items": [
+    {
+      "product_id": {{productId}},
+      "quantity": 1
+    }
+  ]
+}
+
+###
+@mappingId = {{createMapping.response.body.data.id}}
+
+### 3.3 [HAPPY] Check — mapped name returns mapping
+POST {{base}}/product-mappings/check
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "product_names": ["15 ROD MULTICOLOR ABACUS KIT"]
+}
+
+### 3.4 [EDGE] Normalized name match (case-insensitive, extra spaces)
+POST {{base}}/product-mappings/check
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "product_names": ["  15 rod multicolor abacus kit  "]
+}
+
+### 3.5 [HAPPY] Check — unmapped name returns null
+POST {{base}}/product-mappings/check
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "product_names": ["COMPLETELY UNKNOWN PRODUCT XYZ"]
+}
+
+### 3.6 [EDGE] Mixed: one mapped, one unmapped
+POST {{base}}/product-mappings/check
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "product_names": [
+    "15 ROD MULTICOLOR ABACUS KIT",
+    "COMPLETELY UNKNOWN PRODUCT XYZ"
+  ]
+}
+
+### 3.7 [SAD] Duplicate mapping → 422
+POST {{base}}/product-mappings
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "invoice_product_name": "15 ROD MULTICOLOR ABACUS KIT",
+  "items": [
+    {
+      "product_id": {{productId}},
+      "quantity": 1
+    }
+  ]
+}
+
+### 3.8 [SAD] Missing product_id → 422
+POST {{base}}/product-mappings
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "invoice_product_name": "Some Product",
+  "items": [
+    {
+      "quantity": 1
+    }
+  ]
+}
+
+### 3.9 [SAD] Non-existent product_id → 422
+POST {{base}}/product-mappings
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "invoice_product_name": "Another Product Name",
+  "items": [
+    {
+      "product_id": 999999,
+      "quantity": 1
+    }
+  ]
+}
+
+### 3.10 [HAPPY] Update mapping
+PUT {{base}}/product-mappings/{{mappingId}}
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "items": [
+    {
+      "product_id": {{productId}},
+      "quantity": 2
+    }
+  ]
+}
+
+### 3.11 Verify items updated (quantity = 2)
+GET {{base}}/product-mappings/{{mappingId}}
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 4 — INVOICES
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 4.1 [HAPPY] List invoices (Kaushik)
+GET {{base}}/invoices
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 4.2 [HAPPY] List invoices — filter by marketplace
+GET {{base}}/invoices?marketplace=amazon
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 4.3 [HAPPY] List invoices — filter by status
+GET {{base}}/invoices?status=approved
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 4.4 [HAPPY] List invoices — search
+GET {{base}}/invoices?search=INV
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 4.5 [EDGE] List invoices — pagination
+GET {{base}}/invoices?page=1
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 4.6 [SAD] Upload wrong file type → 422
+# Note: Can't test binary upload in .http easily — tested manually
+# Expected: {"success":false,"errors":{"file":["The file must be a file of type: pdf, jpg, jpeg, png."]}}
+
+### 4.7 [EDGE] Get invoice status for existing invoice
+# Replace 1 with an actual invoice ID from 4.1 response
+GET {{base}}/invoices/1/status
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 4.8 [SAD] Get invoice that belongs to another user → 404
+GET {{base}}/invoices/1
+Authorization: Bearer {{tokenR}}
+{{accept}}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 5 — INVOICE APPROVAL CASCADE TEST
+# This section manually simulates the approval with synthetic data
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 5.1 Check stock BEFORE (should be 50 after our restore above)
+GET {{base}}/products/{{productId}}
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 5.2 Create a test invoice manually (set to review status for approval)
+# @name createTestInvoice
+POST {{base}}/invoices
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "invoice_number": "TEST-INV-APPROVE-001",
+  "invoice_date": "2026-07-09",
+  "vendor_name": "Test Vendor",
+  "marketplace": "amazon",
+  "processing_status": "review",
+  "total_amount": 299,
+  "tax_amount": 27.18,
+  "subtotal": 271.82
+}
+
+###
+@testInvoiceId = {{createTestInvoice.response.body.data.id}}
+
+### 5.3 [HAPPY] Approve the invoice with validated_data + line_items
+PUT {{base}}/invoices/{{testInvoiceId}}/approve
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "validated_data": {
+    "invoice_number": "TEST-INV-APPROVE-001",
+    "invoice_date": "2026-07-09",
+    "vendor_name": "Test Vendor",
+    "vendor_gstin": "27AABCU9603R1ZX",
+    "customer_name": "Test Customer",
+    "customer_gstin": "",
+    "subtotal": 271.82,
+    "tax_amount": 27.18,
+    "total_amount": 299,
+    "line_items": [
+      {
+        "product_name": "15 ROD MULTICOLOR ABACUS KIT",
+        "sku": "TEST-SKU-001",
+        "quantity": 2,
+        "unit_price": 149,
+        "cgst_rate": 6,
+        "sgst_rate": 6,
+        "igst_rate": 0,
+        "total_amount": 299
+      }
+    ]
+  }
+}
+
+### 5.4 VERIFY: Stock should now be 48 (50 - 2 * qty_multiplier_2 = 46 OR 50 - 2 = 48)
+### Our mapping has quantity=2, so 2 invoice units × 2 mapping multiplier = 4 deducted → 46
+GET {{base}}/products/{{productId}}
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 5.5 VERIFY: Sales order created
+GET {{base}}/sales
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 5.6 VERIFY: GST record created
+GET {{base}}/gst/summary?year=2026
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 5.7 VERIFY: Audit log has entry
+GET {{base}}/audit-log
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 5.8 VERIFY: Dashboard shows updated data
+GET {{base}}/dashboard/summary
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 5.9 [EDGE] Approve already-approved invoice (should handle gracefully)
+PUT {{base}}/invoices/{{testInvoiceId}}/approve
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "validated_data": {}
+}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 6 — DAMAGED GOODS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 6.1 [HAPPY] List damaged products
+GET {{base}}/damaged-stock
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 6.2 [HAPPY] Damaged stock summary
+GET {{base}}/damaged-stock/summary
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 6.3 Manually set damaged_stock on our test product
+PUT {{base}}/products/{{productId}}
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "damaged_stock": 5
+}
+
+### 6.4 Verify it now appears in damaged list
+GET {{base}}/damaged-stock
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 6.5 [HAPPY] Write off the damaged stock
+POST {{base}}/damaged-stock/{{productId}}/write-off
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{}
+
+### 6.6 VERIFY: damaged_stock = 0
+GET {{base}}/products/{{productId}}
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 6.7 [SAD] Write off when no damaged stock → 422
+POST {{base}}/damaged-stock/{{productId}}/write-off
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{}
+
+### 6.8 [SAD] Raj tries to write off Kaushik's product → 404
+POST {{base}}/damaged-stock/{{productId}}/write-off
+Authorization: Bearer {{tokenR}}
+{{contentJson}}
+{{accept}}
+
+{}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 7 — SALES
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 7.1 [HAPPY] Sales summary — month
+GET {{base}}/sales/summary?period=month
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 7.2 [HAPPY] Sales summary — today
+GET {{base}}/sales/summary?period=today
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 7.3 [HAPPY] Sales summary — week
+GET {{base}}/sales/summary?period=week
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 7.4 [HAPPY] Sales summary — year
+GET {{base}}/sales/summary?period=year
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 7.5 [HAPPY] Sales by marketplace
+GET {{base}}/sales/by-marketplace
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 7.6 [HAPPY] List sales orders
+GET {{base}}/sales
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 7.7 [EDGE] Empty state — new user
+GET {{base}}/sales/summary?period=month
+Authorization: Bearer {{tokenR}}
+{{accept}}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 8 — GST
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 8.1 [HAPPY] GST summary current FY
+GET {{base}}/gst/summary?year=2026
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 8.2 [HAPPY] Monthly GST
+GET {{base}}/gst/monthly/2026/7
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 8.3 [HAPPY] HSN summary
+GET {{base}}/gst/hsn-summary
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 8.4 [EDGE] GST summary with no data (empty year)
+GET {{base}}/gst/summary?year=2019
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 9 — DASHBOARD
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 9.1 [HAPPY] Dashboard summary
+GET {{base}}/dashboard/summary
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 9.2 [HAPPY] Revenue chart
+GET {{base}}/dashboard/revenue-chart?period=monthly
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 9.3 [EDGE] Empty dashboard (Raj — new user with no data)
+GET {{base}}/dashboard/summary
+Authorization: Bearer {{tokenR}}
+{{accept}}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 10 — NOTIFICATIONS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 10.1 [HAPPY] List notifications
+# @name listNotifs
+GET {{base}}/notifications
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+###
+@notifId = {{listNotifs.response.body.data[0].id}}
+
+### 10.2 [HAPPY] Mark single as read
+PUT {{base}}/notifications/{{notifId}}/read
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 10.3 [HAPPY] Mark all as read
+PUT {{base}}/notifications/read-all
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 10.4 Verify all read
+GET {{base}}/notifications
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 11 — SETTINGS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 11.1 [HAPPY] Get settings
+GET {{base}}/settings
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 11.2 [HAPPY] Update profile
+PUT {{base}}/settings
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "name": "Kaushik K",
+  "business_name": "Kynetropo Store",
+  "gstin": "27AABCU9603R1ZX"
+}
+
+### 11.3 [SAD] Invalid GSTIN format
+PUT {{base}}/settings
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "gstin": "INVALID-GSTIN"
+}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 12 — CUSTOMERS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 12.1 [HAPPY] List customers
+GET {{base}}/customers
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 12.2 [HAPPY] Create customer manually
+# @name createCustomer
+POST {{base}}/customers
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "name": "Test Customer Ltd",
+  "email": "test@customer.com",
+  "phone": "9876543210",
+  "gstin": "27AABCU9603R1ZX",
+  "address": "123 Test Street, Mumbai",
+  "marketplace": "amazon"
+}
+
+###
+@customerId = {{createCustomer.response.body.data.id}}
+
+### 12.3 [HAPPY] Get customer purchases
+GET {{base}}/customers/{{customerId}}/purchases
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 12.4 [SAD] Get another user's customer → 404
+GET {{base}}/customers/{{customerId}}
+Authorization: Bearer {{tokenR}}
+{{accept}}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 13 — REPORTS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 13.1 [HAPPY] Generate sales report
+# @name genSalesReport
+POST {{base}}/reports/generate
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "type": "sales",
+  "from_date": "2026-01-01",
+  "to_date": "2026-12-31",
+  "format": "excel",
+  "fields": ["date", "order_number", "marketplace", "revenue", "tax", "net_revenue"]
+}
+
+###
+@reportId = {{genSalesReport.response.body.data.report_id}}
+
+### 13.2 Download report (binary — check 200 response)
+GET {{base}}/reports/{{reportId}}/download
+Authorization: Bearer {{tokenK}}
+
+### 13.3 [HAPPY] Generate inventory report
+POST {{base}}/reports/generate
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "type": "inventory",
+  "from_date": "2026-01-01",
+  "to_date": "2026-12-31",
+  "format": "excel",
+  "fields": ["sku", "name", "category", "current_stock", "cost_price", "selling_price"]
+}
+
+### 13.4 [HAPPY] Generate GST report
+POST {{base}}/reports/generate
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "type": "gst",
+  "from_date": "2026-04-01",
+  "to_date": "2026-07-09",
+  "format": "excel",
+  "fields": ["period", "output_gst", "input_gst", "net_gst", "cgst", "sgst", "igst"]
+}
+
+### 13.5 [SAD] Invalid report type → 422
+POST {{base}}/reports/generate
+Authorization: Bearer {{tokenK}}
+{{contentJson}}
+{{accept}}
+
+{
+  "type": "nonexistent",
+  "from_date": "2026-01-01",
+  "to_date": "2026-12-31",
+  "format": "excel"
+}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 14 — AUDIT LOG
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 14.1 [HAPPY] List audit log
+GET {{base}}/audit-log
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 14.2 [EDGE] Raj sees only his own audit entries
+GET {{base}}/audit-log
+Authorization: Bearer {{tokenR}}
+{{accept}}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 15 — ACCOUNTING
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 15.1 [HAPPY] Journal entries
+GET {{base}}/accounting/journal-entries
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 15.2 [HAPPY] Profit & Loss
+GET {{base}}/accounting/profit-loss?from_date=2026-01-01&to_date=2026-12-31
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 15.3 [HAPPY] Balance sheet
+GET {{base}}/accounting/balance-sheet
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SECTION 16 — CLEANUP (delete test data)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+### 16.1 Delete mapping
+DELETE {{base}}/product-mappings/{{mappingId}}
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 16.2 Verify mapping deleted → 404
+GET {{base}}/product-mappings/{{mappingId}}
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 16.3 Delete test product
+DELETE {{base}}/products/{{productId}}
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 16.4 Verify product deleted → 404
+GET {{base}}/products/{{productId}}
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 16.5 Delete test customer
+DELETE {{base}}/customers/{{customerId}}
+Authorization: Bearer {{tokenK}}
+{{accept}}
+
+### 16.6 Delete test invoice
+DELETE {{base}}/invoices/{{testInvoiceId}}
+Authorization: Bearer {{tokenK}}
+{{accept}}

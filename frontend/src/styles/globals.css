@@ -2,13 +2,25 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ─── Dark mode (default) ──────────────────────────────────────────────────── */
-:root,
+/* ─── Light mode (default) ─────────────────────────────────────────────────── */
+:root {
+  --bg-base:        #F5F7FA;
+  --bg-surface:     #FFFFFF;
+  --bg-card:        #FFFFFF;
+  --bg-elevated:    #F8FAFC;
+  --border-default: #E2E8F0;
+  --border-subtle:  #F1F5F9;
+  --text-primary:   #0F172A;
+  --text-secondary: #475569;
+  --text-muted:     #94A3B8;
+}
+
+/* ─── Dark mode (opt-in via .dark class) ───────────────────────────────────── */
 .dark {
-  --bg-base:      #0A0F1E;
-  --bg-surface:   #111827;
-  --bg-card:      #1F2937;
-  --bg-elevated:  #2D3748;
+  --bg-base:        #0A0F1E;
+  --bg-surface:     #111827;
+  --bg-card:        #1F2937;
+  --bg-elevated:    #2D3748;
   --border-default: #374151;
   --border-subtle:  #1F2937;
   --text-primary:   #F9FAFB;
@@ -16,94 +28,52 @@
   --text-muted:     #6B7280;
 }
 
-/* ─── Light mode ───────────────────────────────────────────────────────────── */
-.light {
-  --bg-base:      #F1F5F9;
-  --bg-surface:   #FFFFFF;
-  --bg-card:      #FFFFFF;
-  --bg-elevated:  #F8FAFC;
-  --border-default: #E2E8F0;
-  --border-subtle:  #EEF2F7;
-  --text-primary:   #0F172A;
-  --text-secondary: #475569;
-  --text-muted:     #94A3B8;
-}
-
 @layer base {
   * { box-sizing: border-box; }
 
   body {
-    @apply bg-bg-base font-sans antialiased;
+    background-color: var(--bg-base);
     color: var(--text-primary);
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     margin: 0;
-    transition: background-color 0.25s ease, color 0.25s ease;
   }
 
-  /* Scrollbar — dark/light aware */
+  /* Scrollbar — light mode */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track  { background: var(--bg-surface); }
-  ::-webkit-scrollbar-thumb  { background: var(--border-default); border-radius: 9999px; }
-  ::-webkit-scrollbar-thumb:hover { background: #6B7280; }
+  ::-webkit-scrollbar-track  { background: #F1F5F9; }
+  ::-webkit-scrollbar-thumb  { background: #CBD5E1; border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
 
-  /* Light-mode text overrides for Tailwind gray utilities */
-  .light .text-gray-100 { color: #0F172A; }
-  .light .text-gray-200 { color: #1E293B; }
-  .light .text-gray-300 { color: #334155; }
-  .light .text-gray-400 { color: #475569; }
-  .light .text-gray-500 { color: #64748B; }
-  .light .text-white    { color: #0F172A; }
-
-  /* Light-mode border overrides */
-  .light .border-border-default { border-color: #E2E8F0; }
-  .light .border-border-subtle  { border-color: #EEF2F7; }
-
-  /* Light-mode card hover */
-  .light .hover\:bg-white\/3:hover  { background-color: rgba(0,0,0,0.03); }
-  .light .hover\:bg-white\/5:hover  { background-color: rgba(0,0,0,0.05); }
-  .light .bg-white\/5  { background-color: rgba(0,0,0,0.04); }
-  .light .bg-white\/10 { background-color: rgba(0,0,0,0.07); }
-
-  /* Light-mode specific backgrounds */
-  .light .bg-bg-card\/80 { background-color: rgba(255,255,255,0.9) !important; }
-  .light .bg-bg-surface  { background-color: #FFFFFF !important; }
-  .light .bg-bg-base     { background-color: #F1F5F9 !important; }
-  .light .bg-bg-elevated { background-color: #F8FAFC !important; }
-  .light .bg-bg-card     { background-color: #FFFFFF !important; }
-
-  /* Light-mode shimmer */
-  .light .shimmer-bg {
-    background: linear-gradient(90deg, #E2E8F0 0%, #F1F5F9 50%, #E2E8F0 100%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-  }
-
-  /* Input fields in light mode */
-  .light input, .light textarea, .light select {
-    background-color: #F8FAFC;
-    border-color: #CBD5E1;
+  /* Input fields */
+  input, textarea, select {
+    background-color: #FFFFFF;
+    border-color: #D1D5DB;
     color: #0F172A;
   }
-  .light input::placeholder, .light textarea::placeholder { color: #94A3B8; }
+  input::placeholder, textarea::placeholder { color: #CBD5E1; }
+  input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.20);
+  }
 
-  /* Table rows in light mode */
-  .light table { color: #1E293B; }
-  .light .border-border-default\/30 { border-color: rgba(203,213,225,0.5); }
-  .light .border-border-default\/50 { border-color: rgba(203,213,225,0.7); }
+  /* Table base */
+  table { color: #1E293B; }
 }
 
 @layer components {
+
+  /* ── Glass card — no blur, clean ERP card ─────────────────────────────────── */
   .glass-card {
-    background-color: var(--bg-card);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(99,102,241,0.15);
-    border-radius: 1rem;
-  }
-  .light .glass-card {
-    background-color: rgba(255,255,255,0.95);
-    border-color: rgba(99,102,241,0.15);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
   }
 
+  /* ── Page enter transition ───────────────────────────────────────────────── */
   .page-enter {
     animation: pageEnter 0.25s ease-out;
   }
@@ -112,8 +82,9 @@
     to   { opacity: 1; transform: translateY(0); }
   }
 
+  /* ── Shimmer skeleton (light mode) ──────────────────────────────────────── */
   .shimmer-bg {
-    background: linear-gradient(90deg, #1F2937 0%, #2D3748 50%, #1F2937 100%);
+    background: linear-gradient(90deg, #E2E8F0 0%, #F1F5F9 50%, #E2E8F0 100%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
   }
@@ -121,4 +92,326 @@
     0%   { background-position: -200% 0; }
     100% { background-position:  200% 0; }
   }
+
+  /* ── Buttons ──────────────────────────────────────────────────────────────── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1.25rem;
+    border-radius: 0.375rem;
+    padding: 0.5rem 1rem;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+    text-decoration: none;
+  }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .btn-primary {
+    background-color: #2563EB;
+    color: #FFFFFF;
+    border-color: #2563EB;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background-color: #1D4ED8;
+    border-color: #1D4ED8;
+  }
+
+  .btn-secondary {
+    background-color: #FFFFFF;
+    color: #374151;
+    border-color: #D1D5DB;
+  }
+  .btn-secondary:hover:not(:disabled) {
+    background-color: #F9FAFB;
+  }
+
+  .btn-ghost {
+    background-color: transparent;
+    color: #4B5563;
+    border-color: transparent;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    color: #111827;
+    background-color: #F3F4F6;
+  }
+
+  .btn-danger {
+    background-color: #DC2626;
+    color: #FFFFFF;
+    border-color: #DC2626;
+  }
+  .btn-danger:hover:not(:disabled) {
+    background-color: #B91C1C;
+    border-color: #B91C1C;
+  }
+
+  /* ── ERP Card ─────────────────────────────────────────────────────────────── */
+  .erp-card {
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  .erp-card-header {
+    padding: 0.75rem 1.25rem;
+    border-bottom: 1px solid #F1F5F9;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #334155;
+  }
+  .erp-card-body {
+    padding: 1.25rem;
+  }
+
+  /* ── KPI / Metric card ────────────────────────────────────────────────────── */
+  .metric-card {
+    background-color: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 0.5rem;
+    padding: 1.25rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+  .metric-card-blue   { border-left: 3px solid #2563EB; }
+  .metric-card-green  { border-left: 3px solid #16A34A; }
+  .metric-card-amber  { border-left: 3px solid #D97706; }
+  .metric-card-red    { border-left: 3px solid #DC2626; }
+
+  .metric-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #0F172A;
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+  }
+  .metric-label {
+    font-size: 0.75rem;
+    color: #94A3B8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+  }
+
+  /* ── ERP Table ────────────────────────────────────────────────────────────── */
+  .erp-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+  .erp-table thead tr {
+    background-color: #F9FAFB;
+    border-bottom: 1px solid #E2E8F0;
+  }
+  .erp-table thead th {
+    padding: 0.75rem 1rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #64748B;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .erp-table tbody tr {
+    background-color: #FFFFFF;
+    border-bottom: 1px solid #F1F5F9;
+    transition: background-color 150ms ease;
+  }
+  .erp-table tbody tr:hover {
+    background-color: rgba(37, 99, 235, 0.03);
+  }
+  .erp-table tbody td {
+    padding: 0.75rem 1rem;
+    color: #334155;
+  }
+
+  /* ── Status badges ────────────────────────────────────────────────────────── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.125rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: 0.25rem;
+    border: 1px solid transparent;
+  }
+  .badge-approved {
+    background-color: #ECFDF5;
+    color: #065F46;
+    border-color: #A7F3D0;
+  }
+  .badge-review {
+    background-color: #EFF6FF;
+    color: #1D4ED8;
+    border-color: #BFDBFE;
+  }
+  .badge-pending {
+    background-color: #FFFBEB;
+    color: #92400E;
+    border-color: #FDE68A;
+  }
+  .badge-error {
+    background-color: #FEF2F2;
+    color: #991B1B;
+    border-color: #FECACA;
+  }
+  .badge-processing {
+    background-color: #F5F3FF;
+    color: #5B21B6;
+    border-color: #DDD6FE;
+  }
+
+  /* ── Input ────────────────────────────────────────────────────────────────── */
+  .erp-input {
+    width: 100%;
+    background-color: #FFFFFF;
+    border: 1px solid #D1D5DB;
+    border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    color: #0F172A;
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  .erp-input::placeholder { color: #CBD5E1; }
+  .erp-input:focus {
+    outline: none;
+    border-color: #2563EB;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.20);
+  }
+
+  .erp-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #334155;
+    margin-bottom: 0.375rem;
+  }
+
+  /* ── Sidebar (dark navy) ──────────────────────────────────────────────────── */
+  .sidebar {
+    width: 240px;
+    background-color: #1E293B;
+    border-right: 1px solid #334155;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  .sidebar-collapsed { width: 56px; }
+
+  .sidebar-logo-area {
+    height: 56px;
+    background-color: #0F172A;
+    display: flex;
+    align-items: center;
+    padding: 0 1rem;
+    flex-shrink: 0;
+  }
+
+  .sidebar-group-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: #64748B;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 0 0.75rem;
+    margin-bottom: 0.25rem;
+    margin-top: 1rem;
+  }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    font-size: 0.875rem;
+    color: #94A3B8;
+    padding: 0.5rem 0.75rem;
+    margin: 0 0.5rem;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    transition: background-color 150ms ease, color 150ms ease;
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .sidebar-item:hover {
+    background-color: #334155;
+    color: #F1F5F9;
+  }
+  .sidebar-item-active {
+    background-color: #2563EB;
+    color: #FFFFFF;
+  }
+  .sidebar-item-active:hover {
+    background-color: #1D4ED8;
+    color: #FFFFFF;
+  }
+
+  /* ── Navbar ───────────────────────────────────────────────────────────────── */
+  .navbar {
+    height: 56px;
+    background-color: #FFFFFF;
+    border-bottom: 1px solid #E2E8F0;
+    display: flex;
+    align-items: center;
+    padding: 0 1.5rem;
+    flex-shrink: 0;
+  }
+
+  /* ── Page layout helpers ──────────────────────────────────────────────────── */
+  .page-container {
+    padding: 1.5rem;
+  }
+  .page-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #1E293B;
+  }
+  .section-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #334155;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* ── Dropdown / Popover shadow ────────────────────────────────────────────── */
+  .dropdown-shadow {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  }
+
+  /* ── Modal shadow ─────────────────────────────────────────────────────────── */
+  .modal-shadow {
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.2);
+  }
+
+  /* ── Marketplace brand colors ─────────────────────────────────────────────── */
+  .brand-amazon  { color: #FF9900; }
+  .brand-flipkart { color: #2874F0; }
+  .brand-meesho  { color: #F43397; }
+  .brand-other   { color: #6B7280; }
+
+  .bg-amazon  { background-color: #FF9900; }
+  .bg-flipkart { background-color: #2874F0; }
+  .bg-meesho  { background-color: #F43397; }
+
+  /* ── Monospace amounts ────────────────────────────────────────────────────── */
+  .amount {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Dark mode shimmer override ───────────────────────────────────────────── */
+  .dark .shimmer-bg {
+    background: linear-gradient(90deg, #1F2937 0%, #2D3748 50%, #1F2937 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+  }
+
+  /* ── Dark mode scrollbar override ────────────────────────────────────────── */
+  .dark ::-webkit-scrollbar-track  { background: #1F2937; }
+  .dark ::-webkit-scrollbar-thumb  { background: #374151; }
+  .dark ::-webkit-scrollbar-thumb:hover { background: #4B5563; }
 }

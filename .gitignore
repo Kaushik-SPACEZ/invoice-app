@@ -21,9 +21,34 @@ backend/storage/app/invoices/
 backend/storage/logs/
 backend/bootstrap/cache/*.php
 
+# Server-side files (managed via SSH/FTP, not git)
+laravel-fresh/
+laravel-fresh-extracted/
+invoice.kynetropo.com/
+
+# One-time server setup/debug scripts
+fix_*.php
+debug_*.php
+check_env.php
+
+# Deploy scripts (local use only)
+deploy_ftp.ps1
+deploy_backend.ps1
+deploy_backend.ps1
+
 # OS
 .DS_Store
 Thumbs.db
 
 # IDE
 .vscode/sftp.json
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+
+# Test output
+tests/e2e_report.json

@@ -9,7 +9,13 @@ export interface ApiResponse<T> {
 
 export interface PaginatedResponse<T> {
   data: T[]
-  meta: {
+  // Laravel paginate returns these at top level (no meta wrapper)
+  current_page: number
+  total: number
+  per_page: number
+  last_page: number
+  // Some responses may wrap in meta — support both
+  meta?: {
     current_page: number
     total: number
     per_page: number
@@ -214,14 +220,23 @@ export interface ProfitLoss {
 
 export interface DashboardSummary {
   today_sales: number
+  todaySales?: number
   monthly_revenue: number
+  monthlyRevenue?: number
   gst_payable: number
+  gstPayable?: number
   net_profit: number
+  netProfit?: number
   total_products: number
+  totalProducts?: number
   low_stock_count: number
+  lowStockCount?: number
   out_of_stock_count: number
+  outOfStockCount?: number
   recent_invoices: Invoice[]
+  recentInvoices?: Invoice[]
   unread_notifications: number
+  unreadNotifications?: number
 }
 
 export interface RevenueChartData {

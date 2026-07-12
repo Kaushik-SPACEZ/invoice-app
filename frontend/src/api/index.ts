@@ -53,3 +53,9 @@ export const settingsApi = {
 export const auditApi = {
   list: (params?: Record<string, unknown>) => client.get('/audit-log', { params }),
 }
+
+export const damagedStockApi = {
+  list: (params?: Record<string, unknown>) => client.get('/damaged-stock', { params }),
+  summary: () => client.get('/damaged-stock/summary'),
+  writeOff: (id: number) => client.post(`/damaged-stock/${id}/write-off`),
+}

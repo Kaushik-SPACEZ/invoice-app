@@ -108,6 +108,14 @@ export const useUpdateProduct = () => {
   })
 }
 
+export const useDeleteProduct = () => {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => productsApi.delete(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
+  })
+}
+
 // ─── Sales ────────────────────────────────────────────────────────────────────
 
 export const useSalesSummary = (period = 'month') =>

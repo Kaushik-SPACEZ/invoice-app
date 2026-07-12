@@ -3,7 +3,6 @@ import { useAuthStore } from '../store/authStore'
 
 const client = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
-  headers: { 'Content-Type': 'application/json' },
   timeout: 30000,
 })
 
@@ -11,6 +10,13 @@ const client = axios.create({
 client.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token
   if (token) config.headers.Authorization = `Bearer ${token}`
+
+  // Only set JSON content-type when NOT sending FormData
+  // FormData must NOT have Content-Type set — browser sets it automatically with the multipart boundary
+  if (!(config.data instanceof FormData)) {
+    config.headers['Content-Type'] = 'application/json'
+  }
+
   return config
 })
 

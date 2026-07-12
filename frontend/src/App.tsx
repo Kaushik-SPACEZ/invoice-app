@@ -1,11 +1,10 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
 import { queryClient } from './lib/queryClient'
 import { AppLayout } from './components/layout/AppLayout'
 import { ProtectedRoute } from './components/layout/ProtectedRoute'
-import { useUIStore } from './store/uiStore'
 
 const Login = lazy(() => import('./pages/Login'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -15,6 +14,7 @@ const InvoiceReview = lazy(() => import('./pages/InvoiceReview'))
 const InvoiceList = lazy(() => import('./pages/InvoiceList'))
 const InvoiceDetail = lazy(() => import('./pages/InvoiceDetail'))
 const Inventory = lazy(() => import('./pages/Inventory'))
+const Purchase = lazy(() => import('./pages/Purchase'))
 const Sales = lazy(() => import('./pages/Sales'))
 const Customers = lazy(() => import('./pages/Customers'))
 const GST = lazy(() => import('./pages/GST'))
@@ -24,6 +24,13 @@ const Marketplace = lazy(() => import('./pages/Marketplace'))
 const Notifications = lazy(() => import('./pages/Notifications'))
 const AuditLog = lazy(() => import('./pages/AuditLog'))
 const Settings = lazy(() => import('./pages/Settings'))
+const SalesReturn = lazy(() => import('./pages/SalesReturn'))
+const DamagedGoods = lazy(() => import('./pages/DamagedGoods'))
+const Mappings = lazy(() => import('./pages/Mappings'))
+const CommissionInvoice = lazy(() => import('./pages/CommissionInvoice'))
+const BankStatement = lazy(() => import('./pages/BankStatement'))
+const UserManagement = lazy(() => import('./pages/UserManagement'))
+const Outstanding = lazy(() => import('./pages/Outstanding'))
 
 const Loader = () => (
   <div className="flex items-center justify-center h-screen bg-bg-base">
@@ -32,13 +39,6 @@ const Loader = () => (
 )
 
 export default function App() {
-  const { darkMode } = useUIStore()
-
-  useEffect(() => {
-    // Apply theme on every render (handles both hydration and toggle)
-    document.documentElement.classList.toggle('dark', darkMode)
-    document.documentElement.classList.toggle('light', !darkMode)
-  }, [darkMode])
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -56,12 +56,20 @@ export default function App() {
                 <Route path="/invoices" element={<InvoiceList />} />
                 <Route path="/invoices/:id" element={<InvoiceDetail />} />
                 <Route path="/inventory" element={<Inventory />} />
+                <Route path="/purchases" element={<Purchase />} />
                 <Route path="/sales" element={<Sales />} />
                 <Route path="/customers" element={<Customers />} />
                 <Route path="/gst" element={<GST />} />
                 <Route path="/accounting" element={<Accounting />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/marketplace" element={<Marketplace />} />
+                <Route path="/returns" element={<SalesReturn />} />
+                <Route path="/damaged-goods" element={<DamagedGoods />} />
+                <Route path="/mappings" element={<Mappings />} />
+                <Route path="/commission-invoices" element={<CommissionInvoice />} />
+                <Route path="/bank-statements" element={<BankStatement />} />
+                <Route path="/users" element={<UserManagement />} />
+                <Route path="/outstanding" element={<Outstanding />} />
                 <Route path="/notifications" element={<Notifications />} />
                 <Route path="/audit-log" element={<AuditLog />} />
                 <Route path="/settings" element={<Settings />} />

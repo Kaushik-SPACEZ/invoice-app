@@ -1,69 +1,84 @@
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Bell, Moon, Sun, Search } from 'lucide-react'
-import { useUIStore } from '../../store/uiStore'
+import { Bell, Search, Menu } from 'lucide-react'
 import { useNotificationStore } from '../../store/notificationStore'
 import { useAuthStore } from '../../store/authStore'
-import { cn } from '../../lib/utils'
+import { useUIStore } from '../../store/uiStore'
 
 const BREADCRUMB_MAP: Record<string, string> = {
   '/dashboard': 'Dashboard',
   '/invoices/upload': 'Upload Invoice',
   '/invoices': 'Invoices',
   '/inventory': 'Inventory',
+  '/purchases': 'Purchases',
   '/sales': 'Sales',
   '/customers': 'Customers',
+  '/returns': 'Sales Returns',
+  '/damaged-goods': 'Damaged Goods',
+  '/mappings': 'Product Mappings',
+  '/marketplace': 'Marketplace',
+  '/commission-invoices': 'Commission Invoices',
+  '/bank-statements': 'Bank Statement',
   '/gst': 'GST',
   '/accounting': 'Accounting',
   '/reports': 'Reports',
-  '/marketplace': 'Marketplace Analytics',
   '/notifications': 'Notifications',
+  '/outstanding': 'Outstanding & Credit',
   '/audit-log': 'Audit Log',
   '/settings': 'Settings',
 }
 
 export const Navbar = () => {
-  const { darkMode, toggleDarkMode } = useUIStore()
   const { unreadCount } = useNotificationStore()
   const { user } = useAuthStore()
+  const { sidebarCollapsed, setSidebarCollapsed } = useUIStore()
   const location = useLocation()
   const navigate = useNavigate()
 
-  const title = BREADCRUMB_MAP[location.pathname] ??
+  const title =
+    BREADCRUMB_MAP[location.pathname] ??
     Object.entries(BREADCRUMB_MAP).find(([k]) => location.pathname.startsWith(k))?.[1] ??
     'BizSync'
 
   return (
-    <header className="h-16 bg-bg-surface/80 backdrop-blur-xl border-b border-border-subtle flex items-center justify-between px-6 sticky top-0 z-10">
-      <h1 className="font-display font-semibold text-base text-gray-200">{title}</h1>
-
-      <div className="flex items-center gap-2">
-        <button className="w-9 h-9 flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors">
-          <Search size={17} />
+    <header className="sticky top-0 z-10 h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4 lg:px-6">
+      <div className="flex items-center gap-3">
+        {/* Hamburger — mobile only */}
+        <button
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          className="lg:hidden flex items-center justify-center rounded-md p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-150"
+        >
+          <Menu size={18} />
         </button>
 
+        <h1 className="text-sm font-semibold text-slate-800">{title}</h1>
+      </div>
+
+      <div className="flex items-center gap-1">
+        {/* Search icon */}
+        <button className="flex items-center justify-center rounded-md p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-150">
+          <Search size={16} />
+        </button>
+
+        {/* Notification bell */}
         <button
           onClick={() => navigate('/notifications')}
-          className="relative w-9 h-9 flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          className="relative flex items-center justify-center rounded-md p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors duration-150"
         >
-          <Bell size={17} />
+          <Bell size={16} />
           {unreadCount > 0 && (
-            <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-danger rounded-full text-white text-[9px] flex items-center justify-center font-bold">
+            <span className="absolute top-1 right-1 min-w-[16px] h-4 bg-red-500 rounded-full text-white text-[10px] flex items-center justify-center font-bold px-0.5 leading-none">
               {unreadCount > 9 ? '9+' : unreadCount}
             </span>
           )}
         </button>
 
+        {/* User avatar */}
         <button
-          onClick={toggleDarkMode}
-          className="w-9 h-9 flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          onClick={() => navigate('/settings')}
+          className="ml-1 w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 transition-colors duration-150 hover:bg-blue-700"
         >
-          {darkMode ? <Sun size={17} /> : <Moon size={17} />}
-        </button>
-
-        <div className="w-8 h-8 rounded-full bg-gradient-primary flex items-center justify-center text-white text-xs font-bold cursor-pointer ml-1"
-          onClick={() => navigate('/settings')}>
           {user?.name?.[0]?.toUpperCase() ?? 'U'}
-        </div>
+        </button>
       </div>
     </header>
   )
