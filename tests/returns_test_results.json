@@ -1,0 +1,46 @@
+{
+  "timestamp": "2026-07-13T18:03:14.055Z",
+  "pass": 25,
+  "fail": 1,
+  "bugs": [
+    {
+      "name": "AI extraction",
+      "detail": "status=error"
+    }
+  ],
+  "finalStocks": {
+    "25352": {
+      "current": 48,
+      "damaged": 2
+    },
+    "POUCH-001": {
+      "current": 49,
+      "damaged": 0
+    },
+    "KHF-S1": {
+      "current": 17,
+      "damaged": 3
+    },
+    "KHF-V": {
+      "current": 17,
+      "damaged": 3
+    },
+    "KHF-P2": {
+      "current": 17,
+      "damaged": 3
+    },
+    "KHF-P3": {
+      "current": 12,
+      "damaged": 3
+    },
+    "KHF-S2": {
+      "current": 15,
+      "damaged": 6
+    },
+    "KHF-P1": {
+      "current": 17,
+      "damaged": 3
+    }
+  },
+  "finalReturns": 19
+}
