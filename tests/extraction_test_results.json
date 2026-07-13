@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-07-13T17:39:38.528Z",
+  "results": {
+    "amazon": {
+      "errors": [],
+      "warnings": [],
+      "passed": true
+    },
+    "flipkart": {
+      "errors": [],
+      "warnings": [
+        "IGST RATE for \"ABACUS\": expected 5%, got 5.14%",
+        "INVOICE NO: expected \"LWACCB0270003665\", got \"LWACCB02790003665\""
+      ],
+      "passed": true
+    },
+    "meesho": {
+      "errors": [],
+      "warnings": [
+        "INVOICE NO: expected \"nSevi27501\", got \"n5ev127501\""
+      ],
+      "passed": true
+    }
+  },
+  "allErrors": []
+}
