@@ -15,6 +15,11 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\ExpenseController;
+use App\Http\Controllers\ProductMappingController;
+use App\Http\Controllers\DamagedStockController;
+use App\Http\Controllers\OutstandingController;
+use App\Http\Controllers\StaffUserController;
+use App\Http\Controllers\BankStatementController;
 
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
@@ -37,6 +42,7 @@ Route::middleware('auth:api')->group(function () {
 
     // Invoices
     Route::post('/invoices/upload', [InvoiceController::class, 'upload']);
+    Route::post('/invoices/manual', [InvoiceController::class, 'manual']);
     Route::get('/invoices/{id}/status', [InvoiceController::class, 'status']);
     Route::get('/invoices/{id}/download', [InvoiceController::class, 'download']);
     Route::put('/invoices/{id}/approve', [InvoiceController::class, 'approve']);
@@ -86,8 +92,41 @@ Route::middleware('auth:api')->group(function () {
     Route::put('/notifications/{id}/read', [NotificationController::class, 'markRead']);
     Route::apiResource('notifications', NotificationController::class)->only(['index', 'destroy']);
 
+    // SKU / Product Mappings
+    Route::post('/product-mappings/check', [ProductMappingController::class, 'check']);
+    Route::apiResource('product-mappings', ProductMappingController::class);
+
     // Audit & Settings
     Route::get('/audit-log', [AuditLogController::class, 'index']);
     Route::get('/settings', [SettingsController::class, 'index']);
     Route::put('/settings', [SettingsController::class, 'update']);
+
+    // Damaged Stock
+    Route::get('/damaged-stock', [DamagedStockController::class, 'index']);
+    Route::get('/damaged-stock/summary', [DamagedStockController::class, 'summary']);
+    Route::post('/damaged-stock/{productId}/write-off', [DamagedStockController::class, 'writeOff']);
+
+    // Outstanding & Credit
+    Route::get('/outstanding/summary', [OutstandingController::class, 'summary']);
+    Route::get('/outstanding/receivables', [OutstandingController::class, 'receivables']);
+    Route::get('/outstanding/payables', [OutstandingController::class, 'payables']);
+    Route::post('/outstanding/{id}/payment', [OutstandingController::class, 'recordPayment']);
+    Route::get('/outstanding/{id}/payments', [OutstandingController::class, 'paymentHistory']);
+
+    // Staff Users (User Management)
+    Route::get('/staff-users/roles/list', [StaffUserController::class, 'roles']);
+    Route::post('/staff-users/roles/add', [StaffUserController::class, 'addRole']);
+    Route::get('/staff-users', [StaffUserController::class, 'index']);
+    Route::post('/staff-users', [StaffUserController::class, 'store']);
+    Route::get('/staff-users/{id}', [StaffUserController::class, 'show']);
+    Route::put('/staff-users/{id}', [StaffUserController::class, 'update']);
+    Route::delete('/staff-users/{id}', [StaffUserController::class, 'destroy']);
+
+    // Bank Statements
+    Route::get('/bank-statements', [BankStatementController::class, 'index']);
+    Route::post('/bank-statements/upload', [BankStatementController::class, 'upload']);
+    Route::get('/bank-statements/reconcile', [BankStatementController::class, 'reconcile']);
+    Route::post('/bank-statements/reconcile/run', [BankStatementController::class, 'runReconcileEndpoint']);
+    Route::post('/bank-statements/entries/{id}/match', [BankStatementController::class, 'markMatched']);
+    Route::post('/bank-statements/entries/{id}/accept', [BankStatementController::class, 'acceptEntry']);
 });

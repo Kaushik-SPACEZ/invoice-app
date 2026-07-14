@@ -17,6 +17,8 @@ class Invoice extends Model
         'processing_status', 'ai_confidence_score',
         'extracted_data', 'validated_data', 'error_message',
         'processed_at', 'approved_at',
+        'invoice_type', 'is_damaged',
+        'is_credit_sale', 'credit_days', 'due_date',
     ];
 
     protected $casts = [

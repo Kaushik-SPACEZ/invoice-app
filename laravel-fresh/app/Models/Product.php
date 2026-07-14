@@ -10,6 +10,7 @@ class Product extends Model
         'user_id', 'sku', 'name', 'description', 'category',
         'hsn_code', 'unit', 'cost_price', 'selling_price',
         'current_stock', 'min_stock_level', 'max_stock_level', 'is_active',
+        'damaged_stock', 'input_gst_rate', 'input_gst_amount',
     ];
 
     protected $casts = [

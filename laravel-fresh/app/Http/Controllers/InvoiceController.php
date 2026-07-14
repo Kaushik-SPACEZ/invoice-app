@@ -19,8 +19,12 @@ class InvoiceController extends Controller
     public function upload(Request $request)
     {
         $validator = Validator::make($request->all(), [
-            'file' => 'required|file|mimes:pdf,jpg,jpeg,png|max:10240',
-            'marketplace' => 'nullable|in:amazon,flipkart,meesho,other',
+            'file'          => 'required|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            'marketplace'   => 'nullable|string',
+            'invoice_type'  => 'nullable|in:sale,return,purchase,commission',
+            'is_damaged'    => 'nullable',
+            'is_credit_sale'=> 'nullable',
+            'credit_days'   => 'nullable|integer|min:1|max:365',
         ]);
 
         if ($validator->fails()) {
@@ -37,6 +41,10 @@ class InvoiceController extends Controller
             'file_type'         => $ext === 'jpeg' ? 'jpg' : $ext,
             'original_filename' => $file->getClientOriginalName(),
             'marketplace'       => $request->marketplace ?? 'other',
+            'invoice_type'      => $request->invoice_type ?? 'sale',
+            'is_damaged'        => $request->boolean('is_damaged', false),
+            'is_credit_sale'    => $request->boolean('is_credit_sale', false),
+            'credit_days'       => $request->input('credit_days', 0),
             'processing_status' => 'pending',
         ]);
 
@@ -47,7 +55,13 @@ class InvoiceController extends Controller
             'message' => 'Invoice queued for processing',
         ], 202);
 
-        // Register processing to run after response is sent
+        // Commission invoices don't need AI extraction — go straight to review
+        if ($invoice->invoice_type === 'commission') {
+            $invoice->update(['processing_status' => 'review']);
+            return $response;
+        }
+
+        // Register AI processing to run after response is sent
         $invoiceId = $invoice->id;
         register_shutdown_function(function() use ($invoiceId) {
             $inv = \App\Models\Invoice::find($invoiceId);
@@ -109,8 +123,9 @@ class InvoiceController extends Controller
                   ->orWhere('vendor_name', 'like', "%{$request->search}%");
             });
         }
-        if ($request->marketplace) $query->where('marketplace', $request->marketplace);
-        if ($request->status)      $query->where('processing_status', $request->status);
+        if ($request->marketplace)   $query->where('marketplace', $request->marketplace);
+        if ($request->status)        $query->where('processing_status', $request->status);
+        if ($request->invoice_type)  $query->where('invoice_type', $request->invoice_type);
 
         return response()->json(['success' => true, 'data' => $query->paginate(20)]);
     }
@@ -121,11 +136,106 @@ class InvoiceController extends Controller
         return response()->json(['success' => true, 'data' => $invoice]);
     }
 
+    public function manual(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'vendor_name'  => 'required|string|max:255',
+            'total_amount' => 'required|numeric|min:0',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'errors' => $validator->errors()], 422);
+        }
+
+        $invoice = Invoice::create([
+            'user_id'           => auth()->id(),
+            'file_path'         => null,
+            'file_type'         => null,
+            'original_filename' => null,
+            'invoice_number'    => $request->invoice_number,
+            'invoice_date'      => $request->invoice_date,
+            'vendor_name'       => $request->vendor_name,
+            'vendor_gstin'      => $request->vendor_gstin,
+            'marketplace'       => $request->marketplace ?? 'other',
+            'invoice_type'      => $request->invoice_type ?? 'sale',
+            'is_damaged'        => false,
+            'subtotal'          => $request->subtotal ?? round($request->total_amount - ($request->tax_amount ?? 0), 2),
+            'tax_amount'        => $request->tax_amount ?? 0,
+            'total_amount'      => $request->total_amount,
+            'processing_status' => $request->processing_status ?? 'approved',
+            'approved_at'       => now(),
+            'extracted_data'    => [
+                'invoice_number' => $request->invoice_number,
+                'invoice_date'   => $request->invoice_date,
+                'vendor_name'    => $request->vendor_name,
+                'vendor_gstin'   => $request->vendor_gstin,
+                'customer_name'  => $request->customer_name,
+                'subtotal'       => $request->subtotal ?? 0,
+                'tax_amount'     => $request->tax_amount ?? 0,
+                'total_amount'   => $request->total_amount,
+                'line_items'     => $request->line_items ?? [],
+            ],
+        ]);
+
+        // Save line items if provided
+        if (!empty($request->line_items)) {
+            foreach ($request->line_items as $item) {
+                $invoice->lineItems()->create([
+                    'product_name'  => $item['product_name'] ?? 'Unknown',
+                    'sku'           => $item['sku'] ?? null,
+                    'hsn_code'      => $item['hsn_code'] ?? null,
+                    'quantity'      => $item['quantity'] ?? 1,
+                    'unit_price'    => $item['unit_price'] ?? 0,
+                    'discount'      => $item['discount'] ?? 0,
+                    'taxable_value' => $item['taxable_value'] ?? round(($item['quantity'] ?? 1) * ($item['unit_price'] ?? 0), 2),
+                    'cgst_rate'     => $item['cgst_rate'] ?? 0,
+                    'cgst_amount'   => $item['cgst_amount'] ?? 0,
+                    'sgst_rate'     => $item['sgst_rate'] ?? 0,
+                    'sgst_amount'   => $item['sgst_amount'] ?? 0,
+                    'igst_rate'     => $item['igst_rate'] ?? 0,
+                    'igst_amount'   => $item['igst_amount'] ?? 0,
+                    'total_amount'  => $item['total_amount'] ?? 0,
+                    'confidence_score' => 100,
+                ]);
+            }
+        }
+
+        // Run approval cascade for sale/purchase manual invoices
+        if (in_array($invoice->invoice_type, ['sale', 'purchase']) && $invoice->processing_status === 'approved') {
+            try {
+                $this->approvalService->approve($invoice, $invoice->extracted_data ?? []);
+            } catch (\Exception $e) {
+                \Illuminate\Support\Facades\Log::warning('Manual invoice cascade: ' . $e->getMessage());
+            }
+        }
+
+        return response()->json(['success' => true, 'data' => $invoice->fresh(), 'message' => 'Invoice created'], 201);
+    }
+
     public function approve(Request $request, $id)
     {
         $invoice = Invoice::where('user_id', auth()->id())->findOrFail($id);
-        $result  = $this->approvalService->approve($invoice, $request->validated_data ?? []);
-        return response()->json(['success' => true, 'data' => $result, 'message' => 'Invoice approved successfully']);
+
+        // Idempotent: if already approved, return success without re-running cascade
+        if ($invoice->processing_status === 'approved') {
+            return response()->json([
+                'success' => true,
+                'data'    => ['invoice' => $invoice->fresh(), 'modules_updated' => []],
+                'message' => 'Invoice was already approved',
+            ]);
+        }
+
+        $validatedData = $request->input('validated_data', []);
+        if (!is_array($validatedData)) {
+            $validatedData = [];
+        }
+
+        try {
+            $result = $this->approvalService->approve($invoice, $validatedData);
+            return response()->json(['success' => true, 'data' => $result, 'message' => 'Invoice approved successfully']);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Invoice approval failed: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+            return response()->json(['success' => false, 'message' => 'Approval failed: ' . $e->getMessage()], 500);
+        }
     }
 
     public function update(Request $request, $id)

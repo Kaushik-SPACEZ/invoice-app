@@ -62,7 +62,28 @@ class ProductController extends Controller
 
     public function destroy($id)
     {
-        Product::where('user_id', auth()->id())->findOrFail($id)->delete();
+        $product = Product::where('user_id', auth()->id())->findOrFail($id);
+
+        // Remove from product mapping items (cascade)
+        \App\Models\ProductMappingItem::where('product_id', $product->id)->each(function ($item) {
+            $mapping = $item->mapping;
+            $item->delete();
+            if ($mapping && $mapping->items()->count() === 0) {
+                $mapping->delete();
+            }
+        });
+
+        // Nullify product_id on inventory_transactions (keep history, just unlink)
+        \Illuminate\Support\Facades\DB::table('inventory_transactions')
+            ->where('product_id', $product->id)
+            ->update(['product_id' => null]);
+
+        // Nullify product_id on invoice_line_items (keep invoice history)
+        \Illuminate\Support\Facades\DB::table('invoice_line_items')
+            ->where('product_id', $product->id)
+            ->update(['product_id' => null]);
+
+        $product->delete();
         return response()->json(['success' => true, 'message' => 'Product deleted']);
     }
 

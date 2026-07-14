@@ -275,12 +275,26 @@ export default function BankStatement() {
                         </td>
                         <td className="px-4 py-3 text-xs text-slate-500">{entry.matched_reference ?? '—'}</td>
                         <td className="px-4 py-3">
-                          {entry.match_status !== 'matched' && (
-                            <button onClick={() => handleMarkMatched(entry.id)}
-                              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 px-2 py-1 rounded border border-blue-200 hover:bg-blue-50">
-                              <CheckSquare size={11} /> Mark Matched
-                            </button>
-                          )}
+                          <div className="flex gap-1.5">
+                            {entry.match_status !== 'matched' && (
+                              <button onClick={() => handleMarkMatched(entry.id)}
+                                className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 px-2 py-1 rounded border border-blue-200 hover:bg-blue-50 whitespace-nowrap">
+                                <CheckSquare size={11} /> Match
+                              </button>
+                            )}
+                            {entry.match_status === 'unmatched' && (
+                              <button onClick={async () => {
+                                try {
+                                  const r = await client.post(`/bank-statements/entries/${entry.id}/accept`)
+                                  toast.success(r.data.message ?? 'Accepted')
+                                  refetchRecon()
+                                } catch { toast.error('Failed') }
+                              }}
+                                className="flex items-center gap-1 text-xs text-emerald-600 hover:text-emerald-700 px-2 py-1 rounded border border-emerald-200 hover:bg-emerald-50 whitespace-nowrap">
+                                ✓ Accept
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
