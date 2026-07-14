@@ -1,20 +1,46 @@
 import { useState } from 'react'
-import { Search } from 'lucide-react'
+import { Search, Plus } from 'lucide-react'
 import { useCustomers } from '../hooks/queries'
+import { useQueryClient } from '@tanstack/react-query'
 import { PageWrapper } from '../components/layout/PageWrapper'
-import { Badge } from '../components/ui/Badge'
+import { Modal } from '../components/ui/Modal'
 import { TableSkeleton, EmptyState } from '../components/ui/Skeleton'
 import { formatINR } from '../lib/utils'
 import { cn } from '../lib/utils'
+import client from '../api/client'
+import toast from 'react-hot-toast'
 import type { Customer } from '../types'
 
+const EMPTY_CUSTOMER = {
+  name: '', email: '', phone: '', gstin: '', address_line1: '',
+  city: '', state: '', pincode: '', customer_type: 'b2c', marketplace: 'direct',
+}
+
 export default function Customers() {
+  const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const [type, setType] = useState('all')
   const [selected, setSelected] = useState<Customer | null>(null)
+  const [showAddModal, setShowAddModal] = useState(false)
+  const [addForm, setAddForm] = useState({ ...EMPTY_CUSTOMER })
+  const [saving, setSaving] = useState(false)
 
   const { data, isLoading } = useCustomers({ search: search || undefined, customer_type: type !== 'all' ? type : undefined })
   const customers = data?.data ?? []
+
+  const handleAdd = async () => {
+    if (!addForm.name.trim()) { toast.error('Customer name required'); return }
+    setSaving(true)
+    try {
+      await client.post('/customers', addForm)
+      toast.success('Customer added!')
+      qc.invalidateQueries({ queryKey: ['customers'] })
+      setShowAddModal(false)
+      setAddForm({ ...EMPTY_CUSTOMER })
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message ?? 'Failed to add customer')
+    } finally { setSaving(false) }
+  }
 
   const initials = (name: string) => name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
   const AVATAR_COLORS = ['bg-blue-100 text-blue-700', 'bg-emerald-100 text-emerald-700', 'bg-amber-100 text-amber-700', 'bg-pink-100 text-pink-700', 'bg-purple-100 text-purple-700']
@@ -24,7 +50,13 @@ export default function Customers() {
     <PageWrapper>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-slate-800">Customers</h1>
-        <p className="text-sm text-slate-400">{data?.total ?? data?.meta?.total ?? 0} total</p>
+        <div className="flex items-center gap-3">
+          <p className="text-sm text-slate-400">{data?.total ?? data?.meta?.total ?? 0} total</p>
+          <button onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+            <Plus size={14} /> Add Customer
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -83,6 +115,52 @@ export default function Customers() {
           ))}
         </div>
       )}
+
+      {/* Add Customer Modal */}
+      <Modal open={showAddModal} onClose={() => setShowAddModal(false)} title="Add Customer" size="lg">
+        <div className="grid grid-cols-2 gap-4">
+          {[
+            { label: 'Full Name *', field: 'name', placeholder: 'e.g. Katyayani Lakshmi' },
+            { label: 'Email', field: 'email', placeholder: 'customer@email.com', type: 'email' },
+            { label: 'Phone', field: 'phone', placeholder: '9876543210' },
+            { label: 'GSTIN', field: 'gstin', placeholder: '33ATMPP2365G1ZK', mono: true },
+            { label: 'City', field: 'city', placeholder: 'e.g. Mumbai' },
+            { label: 'State', field: 'state', placeholder: 'e.g. Maharashtra' },
+            { label: 'Pincode', field: 'pincode', placeholder: '400001', mono: true },
+          ].map(({ label, field, placeholder, type, mono }) => (
+            <div key={field}>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}</label>
+              <input type={type ?? 'text'} placeholder={placeholder}
+                value={(addForm as any)[field]}
+                onChange={e => {
+                  const v = field === 'gstin' ? e.target.value.toUpperCase() : e.target.value
+                  setAddForm(p => ({ ...p, [field]: v }))
+                }}
+                className={`w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 ${mono ? 'font-mono' : ''}`} />
+            </div>
+          ))}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Customer Type</label>
+            <select value={addForm.customer_type} onChange={e => setAddForm(p => ({ ...p, customer_type: e.target.value }))}
+              className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+              <option value="b2c">B2C (Retail customer)</option>
+              <option value="b2b">B2B (Business with GSTIN)</option>
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">Full Address</label>
+            <textarea placeholder="Street address, locality…" rows={2} value={addForm.address_line1}
+              onChange={e => setAddForm(p => ({ ...p, address_line1: e.target.value }))}
+              className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 resize-none" />
+          </div>
+        </div>
+        <div className="flex gap-3 mt-6 pt-4 border-t border-gray-100">
+          <button onClick={() => setShowAddModal(false)} className="px-4 py-2 text-sm font-medium bg-white border border-gray-300 text-slate-700 rounded-md hover:bg-gray-50">Cancel</button>
+          <button onClick={handleAdd} disabled={saving} className="flex-1 px-6 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors">
+            {saving ? 'Saving…' : 'Add Customer'}
+          </button>
+        </div>
+      </Modal>
 
       {/* Detail side panel */}
       {selected && (

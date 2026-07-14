@@ -43,6 +43,7 @@ export default function UploadInvoice() {
   const [marketplace, setMarketplace] = useState('amazon')
   const [isCreditSale, setIsCreditSale] = useState(false)
   const [creditDays, setCreditDays] = useState('30')
+  const [advanceAmount, setAdvanceAmount] = useState('')
   const [uploading, setUploading] = useState(false)
   const navigate = useNavigate()
 
@@ -80,7 +81,7 @@ export default function UploadInvoice() {
           (pct) => {
             if (pct <= 100) setFiles((prev) => prev.map((f) => f.id === item.id ? { ...f, progress: pct } : f))
           },
-          { is_credit_sale: isCreditSale, credit_days: isCreditSale ? parseInt(creditDays) : 0 }
+          { is_credit_sale: isCreditSale, credit_days: isCreditSale ? parseInt(creditDays) : 0, advance_amount: isCreditSale && advanceAmount ? parseFloat(advanceAmount) : 0 }
         )
         const invoiceId = data.data.invoice_id
         setFiles((prev) => prev.map((f) => f.id === item.id ? { ...f, status: 'done', progress: 100, invoiceId } : f))
@@ -142,14 +143,23 @@ export default function UploadInvoice() {
           </button>
           <div className="flex-1">
             <p className="text-sm font-medium text-slate-700">Credit Sale</p>
-            <p className="text-xs text-slate-400">Customer pays later — creates outstanding receivable</p>
+            <p className="text-xs text-slate-400">Customer pays later — balance goes to Outstanding</p>
             {isCreditSale && (
-              <div className="mt-2 flex items-center gap-2">
-                <label className="text-xs text-slate-600 flex-shrink-0">Credit Period:</label>
-                <select value={creditDays} onChange={e => setCreditDays(e.target.value)}
-                  className="text-xs px-2 py-1 border border-gray-300 rounded bg-white text-slate-800 focus:outline-none focus:border-blue-500">
-                  {[7, 15, 30, 45, 60, 90].map(d => <option key={d} value={d}>{d} days</option>)}
-                </select>
+              <div className="mt-2 space-y-2">
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-600 flex-shrink-0">Credit Period:</label>
+                  <select value={creditDays} onChange={e => setCreditDays(e.target.value)}
+                    className="text-xs px-2 py-1 border border-gray-300 rounded bg-white text-slate-800 focus:outline-none focus:border-blue-500">
+                    {[7, 15, 30, 45, 60, 90].map(d => <option key={d} value={d}>{d} days</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-600 flex-shrink-0 w-28">Advance Paid (₹):</label>
+                  <input type="number" min="0" step="0.01" placeholder="0.00 (optional)"
+                    value={advanceAmount} onChange={e => setAdvanceAmount(e.target.value)}
+                    className="text-xs px-2 py-1 border border-gray-300 rounded bg-white text-slate-800 font-mono w-32 focus:outline-none focus:border-blue-500" />
+                  <span className="text-xs text-slate-400">Balance = Invoice - Advance → Outstanding</span>
+                </div>
               </div>
             )}
           </div>
