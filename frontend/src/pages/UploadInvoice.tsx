@@ -2,12 +2,12 @@ import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDropzone, FileRejection } from 'react-dropzone'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Upload, X, FileText, Image, CheckCircle, AlertCircle } from 'lucide-react'
+import { Upload, X, FileText, Image, CheckCircle, AlertCircle, Plus } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { invoicesApi } from '../api/invoices'
 import { PageWrapper } from '../components/layout/PageWrapper'
 import { Button } from '../components/ui/Button'
-import { Select } from '../components/ui/Input'
+import { DynamicSelect } from '../components/ui/DynamicSelect'
 import { cn } from '../lib/utils'
 
 interface FileItem {
@@ -19,7 +19,9 @@ interface FileItem {
   error?: string
 }
 
-const MARKETPLACE_OPTIONS = [
+// Simplified primary marketplaces + "Other" with custom entry
+const PRIMARY_MARKETPLACES = ['amazon', 'flipkart', 'meesho', 'other']
+const ALL_MARKETPLACE_OPTIONS = [
   { value: 'amazon', label: 'Amazon' },
   { value: 'flipkart', label: 'Flipkart' },
   { value: 'meesho', label: 'Meesho' },
@@ -45,18 +47,14 @@ export default function UploadInvoice() {
   const navigate = useNavigate()
 
   const onDrop = useCallback((accepted: File[], rejected: FileRejection[]) => {
-    // Show error for rejected files (too large, wrong type)
     rejected.forEach(({ file, errors }) => {
       const reason = errors[0]?.code === 'file-too-large' ? 'exceeds 10 MB limit' : 'unsupported file type'
       toast.error(`${file.name} — ${reason}`)
     })
-    const newFiles: FileItem[] = accepted.map((f) => ({
+    setFiles((prev) => [...prev, ...accepted.map((f) => ({
       id: Math.random().toString(36).slice(2),
-      file: f,
-      progress: 0,
-      status: 'idle',
-    }))
-    setFiles((prev) => [...prev, ...newFiles])
+      file: f, progress: 0, status: 'idle' as const,
+    }))])
   }, [])
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -70,9 +68,9 @@ export default function UploadInvoice() {
   const processAll = async () => {
     setUploading(true)
     const pending = files.filter((f) => f.status === 'idle')
-    // Track results locally to avoid stale-closure issue with `files` state
-    let firstInvoiceId: number | undefined
+    const invoiceIds: number[] = []
 
+    // Upload ALL files first, collect all invoice IDs
     for (const item of pending) {
       setFiles((prev) => prev.map((f) => f.id === item.id ? { ...f, status: 'uploading' } : f))
       try {
@@ -86,7 +84,7 @@ export default function UploadInvoice() {
         )
         const invoiceId = data.data.invoice_id
         setFiles((prev) => prev.map((f) => f.id === item.id ? { ...f, status: 'done', progress: 100, invoiceId } : f))
-        if (!firstInvoiceId) firstInvoiceId = invoiceId
+        invoiceIds.push(invoiceId)
       } catch {
         setFiles((prev) => prev.map((f) => f.id === item.id ? { ...f, status: 'error', error: 'Upload failed' } : f))
         toast.error(`Failed to upload ${item.file.name}`)
@@ -94,9 +92,21 @@ export default function UploadInvoice() {
     }
     setUploading(false)
 
-    // Navigate to processing page for the first successfully uploaded invoice
-    if (firstInvoiceId) {
-      setTimeout(() => navigate(`/invoices/${firstInvoiceId}/processing`), 600)
+    if (invoiceIds.length === 0) return
+
+    if (invoiceIds.length === 1) {
+      // Single invoice — go to its individual processing page
+      setTimeout(() => navigate(`/invoices/${invoiceIds[0]}/processing`), 600)
+    } else {
+      // Multiple invoices — go straight to invoices list
+      // Store IDs so the list page can highlight & poll them
+      const w = window as any
+      w.__bulkFileObjects = w.__bulkFileObjects ?? {}
+      files.filter(f => f.invoiceId).forEach(f => {
+        w.__bulkFileObjects[f.invoiceId!] = { file: f.file, marketplace }
+      })
+      sessionStorage.setItem('pendingInvoiceIds', invoiceIds.join(','))
+      setTimeout(() => navigate('/invoices'), 600)
     }
   }
 
@@ -105,27 +115,28 @@ export default function UploadInvoice() {
   return (
     <PageWrapper>
       <div className="max-w-2xl mx-auto">
-        <div className="mb-8">
-          <h1 className="font-display font-bold text-2xl mb-1" style={{ color: 'var(--text-primary)' }}>Upload Invoices</h1>
-          <p className="text-sm text-slate-400">PDF, JPG, or PNG — up to 10MB each. AI will extract all data automatically.</p>
+        <div className="mb-6">
+          <h1 className="text-xl font-semibold text-slate-800">Upload Invoice</h1>
+          <p className="text-sm text-slate-400 mt-1">PDF, JPG, or PNG — up to 10MB each. AI extracts all data automatically.</p>
         </div>
 
-        <Select
-          label="Marketplace"
-          options={MARKETPLACE_OPTIONS}
-          value={marketplace}
-          onChange={(e) => setMarketplace(e.target.value)}
-          className="mb-4"
-        />
+        {/* Platform selector — dynamic */}
+        <div className="mb-5">
+          <p className="text-sm font-medium text-slate-700 mb-2">Platform</p>
+          <DynamicSelect
+            value={marketplace}
+            onChange={setMarketplace}
+            options={ALL_MARKETPLACE_OPTIONS}
+            settingsKey="custom_platforms"
+            chipStyle
+          />
+        </div>
 
         {/* Credit Sale Toggle */}
-        <div className="mb-4 flex items-start gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50/50">
+        <div className="mb-5 flex items-start gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50/50">
           <button
             onClick={() => setIsCreditSale(p => !p)}
-            className={cn(
-              'mt-0.5 w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0',
-              isCreditSale ? 'bg-blue-600' : 'bg-gray-300'
-            )}
+            className={cn('mt-0.5 w-10 h-5 rounded-full transition-colors duration-200 flex-shrink-0', isCreditSale ? 'bg-blue-600' : 'bg-gray-300')}
           >
             <span className={cn('block w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 mx-0.5', isCreditSale ? 'translate-x-5' : 'translate-x-0')} />
           </button>
@@ -147,20 +158,14 @@ export default function UploadInvoice() {
         {/* Drop zone */}
         <div
           {...getRootProps()}
-          style={{ transform: isDragActive ? 'scale(1.01)' : 'scale(1)', transition: 'all 0.2s ease' }}
           className={cn(
-            'border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-200',
-            isDragActive
-              ? 'border-primary bg-primary/5'
-              : 'border-gray-200 hover:border-primary/50 hover:bg-primary/3'
+            'border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all duration-200',
+            isDragActive ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
           )}
         >
           <input {...getInputProps()} />
-          <motion.div
-            animate={isDragActive ? { y: -4 } : { y: 0 }}
-            className="flex flex-col items-center gap-3"
-          >
-            <div className={cn('w-14 h-14 rounded-2xl flex items-center justify-center', isDragActive ? 'bg-primary/20 text-blue-600' : 'bg-gray-100 text-slate-400')}>
+          <div className="flex flex-col items-center gap-3">
+            <div className={cn('w-14 h-14 rounded-xl flex items-center justify-center', isDragActive ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-slate-400')}>
               <Upload size={24} />
             </div>
             <div>
@@ -172,26 +177,16 @@ export default function UploadInvoice() {
                 <span key={f} className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-slate-400 border border-gray-200">{f}</span>
               ))}
             </div>
-          </motion.div>
+          </div>
         </div>
 
         {/* File Queue */}
         <AnimatePresence>
           {files.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-4 space-y-2"
-            >
+            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="mt-4 space-y-2">
               {files.map((item) => (
-                <motion.div
-                  key={item.id}
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 10 }}
-                  className="flex items-center gap-3 bg-bg-card border border-gray-200 rounded-xl p-3"
-                >
+                <motion.div key={item.id} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }}
+                  className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl p-3">
                   <div className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
                     {item.file.type === 'application/pdf' ? <FileText size={15} className="text-red-400" /> : <Image size={15} className="text-blue-400" />}
                   </div>
@@ -199,10 +194,8 @@ export default function UploadInvoice() {
                     <p className="text-sm text-slate-700 truncate">{item.file.name}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
-                        <motion.div
-                          animate={{ width: `${item.progress}%` }}
-                          className={cn('h-full rounded-full', item.status === 'done' ? 'bg-emerald-400' : item.status === 'error' ? 'bg-red-400' : 'bg-primary')}
-                        />
+                        <motion.div animate={{ width: `${item.progress}%` }}
+                          className={cn('h-full rounded-full', item.status === 'done' ? 'bg-emerald-400' : item.status === 'error' ? 'bg-red-400' : 'bg-blue-500')} />
                       </div>
                       <span className="text-xs text-slate-400 font-mono">{(item.file.size / 1024).toFixed(0)}KB</span>
                     </div>
@@ -210,9 +203,7 @@ export default function UploadInvoice() {
                   {item.status === 'done' && <CheckCircle size={16} className="text-emerald-400 flex-shrink-0" />}
                   {item.status === 'error' && <AlertCircle size={16} className="text-red-400 flex-shrink-0" />}
                   {item.status === 'idle' && (
-                    <button onClick={() => removeFile(item.id)} className="text-slate-400 hover:text-slate-500 flex-shrink-0">
-                      <X size={15} />
-                    </button>
+                    <button onClick={() => removeFile(item.id)} className="text-slate-400 hover:text-slate-600 flex-shrink-0"><X size={15} /></button>
                   )}
                 </motion.div>
               ))}
@@ -224,7 +215,9 @@ export default function UploadInvoice() {
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-6">
             <Button onClick={processAll} loading={uploading} fullWidth size="lg">
               <Upload size={16} />
-              {uploading ? 'Uploading…' : `Process ${files.filter((f) => f.status === 'idle').length} Invoice${files.filter((f) => f.status === 'idle').length > 1 ? 's' : ''}`}
+              {uploading
+                ? 'Uploading…'
+                : `Process ${files.filter(f => f.status === 'idle').length} Invoice${files.filter(f => f.status === 'idle').length > 1 ? 's' : ''}`}
             </Button>
           </motion.div>
         )}

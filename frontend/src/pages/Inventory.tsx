@@ -1,15 +1,17 @@
-import { useState } from 'react'
-import { Edit2, Trash2, Search, Package, AlertTriangle, XCircle, Plus, Tag, X } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Edit2, Trash2, Search, Package, AlertTriangle, XCircle, Tag } from 'lucide-react'
 import { useProducts, useLowStockProducts, useCreateProduct, useUpdateProduct, useDeleteProduct } from '../hooks/queries'
 import { PageWrapper } from '../components/layout/PageWrapper'
 import { Button } from '../components/ui/Button'
 import { Modal } from '../components/ui/Modal'
+import { DynamicSelect } from '../components/ui/DynamicSelect'
 import { TableSkeleton, EmptyState } from '../components/ui/Skeleton'
 import { formatINR, cn } from '../lib/utils'
+import client from '../api/client'
 import toast from 'react-hot-toast'
 import type { Product } from '../types'
 
-const DEFAULT_CATEGORIES = ['Electronics', 'Accessories', 'Cables', 'Audio', 'Mobile', 'Clothing']
+const DEFAULT_CATEGORIES = ['Electronics', 'Accessories', 'Cables', 'Audio', 'Mobile', 'Clothing', 'Education']
 
 const STOCK_FILTERS = [
   { value: 'all', label: 'All' },
@@ -19,31 +21,6 @@ const STOCK_FILTERS = [
 ]
 
 const TABLE_HEADERS = ['SKU', 'Product', 'Category', 'Stock', 'Min Level', 'Cost Price', 'Sell Price', '']
-
-// Persist user-added categories in localStorage
-function useCategories() {
-  const [custom, setCustom] = useState<string[]>(() => {
-    try { return JSON.parse(localStorage.getItem('biz_categories') ?? '[]') } catch { return [] }
-  })
-
-  const all = [...new Set([...DEFAULT_CATEGORIES, ...custom])]
-
-  const add = (cat: string) => {
-    const trimmed = cat.trim()
-    if (!trimmed || all.includes(trimmed)) return
-    const next = [...custom, trimmed]
-    setCustom(next)
-    localStorage.setItem('biz_categories', JSON.stringify(next))
-  }
-
-  const remove = (cat: string) => {
-    const next = custom.filter(c => c !== cat)
-    setCustom(next)
-    localStorage.setItem('biz_categories', JSON.stringify(next))
-  }
-
-  return { all, add, remove, custom }
-}
 
 const EMPTY_FORM = {
   sku: '', name: '', category: '', hsn_code: '', unit: 'pcs',
@@ -59,10 +36,24 @@ export default function Inventory() {
   const [editProduct, setEditProduct] = useState<Product | null>(null)
   const [form, setForm] = useState({ ...EMPTY_FORM })
   const [errors, setErrors] = useState<Record<string, string>>({})
-  const [newCatInput, setNewCatInput] = useState('')
-  const [showCatInput, setShowCatInput] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
 
-  const { all: categories, add: addCategory, remove: removeCategory, custom: customCats } = useCategories()
+  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES)
+
+  // Load custom categories from server settings
+  useEffect(() => {
+    client.get('/settings').then(r => {
+      const stored = r.data?.data?.custom_categories
+      if (stored) {
+        try {
+          const custom = JSON.parse(stored) as Array<{ value: string; label: string }>
+          const customLabels = custom.map(c => c.label)
+          setCategories([...new Set([...DEFAULT_CATEGORIES, ...customLabels])])
+        } catch {}
+      }
+    }).catch(() => {})
+  }, [])
 
   const { data, isLoading } = useProducts({
     search: search || undefined,
@@ -155,15 +146,6 @@ export default function Inventory() {
   const fieldChange = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm(prev => ({ ...prev, [key]: e.target.value }))
     if (errors[key]) setErrors(prev => { const n = { ...prev }; delete n[key]; return n })
-  }
-
-  const handleAddCategory = () => {
-    if (!newCatInput.trim()) return
-    addCategory(newCatInput.trim())
-    setForm(prev => ({ ...prev, category: newCatInput.trim() }))
-    setNewCatInput('')
-    setShowCatInput(false)
-    toast.success(`Category "${newCatInput.trim()}" added`)
   }
 
   return (
@@ -275,7 +257,7 @@ export default function Inventory() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
                           <button onClick={() => openEdit(p)} className="p-1.5 rounded text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors duration-150" title="Edit product"><Edit2 size={13} /></button>
-                          <button onClick={() => { if (window.confirm(`Delete "${p.name}"?`)) deleteProduct.mutate(p.id) }} className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors duration-150" title="Delete product"><Trash2 size={13} /></button>
+                          <button onClick={() => { setDeleteTarget(p); setShowDeleteModal(true) }} className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors duration-150" title="Delete product"><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -305,41 +287,16 @@ export default function Inventory() {
             {errors.name && <p className="mt-1 text-xs text-red-600">{errors.name}</p>}
           </div>
 
-          {/* Category with add-new option */}
+          {/* Category — dynamic (type to search, Enter to add new) */}
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Category</label>
-            {showCatInput ? (
-              <div className="flex gap-2">
-                <input autoFocus type="text" placeholder="New category name" value={newCatInput} onChange={e => setNewCatInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleAddCategory(); if (e.key === 'Escape') setShowCatInput(false) }}
-                  className="flex-1 px-3 py-2 text-sm bg-white border border-gray-300 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
-                <button onClick={handleAddCategory} className="px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">Add</button>
-                <button onClick={() => setShowCatInput(false)} className="px-3 py-2 text-sm bg-white border border-gray-300 text-slate-600 rounded-md hover:bg-gray-50 transition-colors"><X size={14} /></button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <select value={form.category} onChange={fieldChange('category')}
-                  className="flex-1 px-3 py-2 text-sm bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors">
-                  <option value="">Select category…</option>
-                  {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                </select>
-                <button onClick={() => setShowCatInput(true)} title="Add new category"
-                  className="px-2.5 py-2 text-sm bg-white border border-gray-300 text-slate-600 rounded-md hover:bg-gray-50 hover:text-blue-600 transition-colors">
-                  <Plus size={14} />
-                </button>
-              </div>
-            )}
-            {/* Show custom categories with delete option */}
-            {customCats.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {customCats.map(cat => (
-                  <span key={cat} className="inline-flex items-center gap-1 text-xs px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded">
-                    {cat}
-                    <button onClick={() => removeCategory(cat)} className="hover:text-red-600 ml-0.5"><X size={10} /></button>
-                  </span>
-                ))}
-              </div>
-            )}
+            <DynamicSelect
+              value={form.category}
+              onChange={v => setForm(prev => ({ ...prev, category: v }))}
+              options={categories.map(c => ({ value: c, label: c }))}
+              settingsKey="custom_categories"
+              placeholder="Select category…"
+            />
           </div>
 
           <div>
@@ -350,7 +307,14 @@ export default function Inventory() {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Cost Price (₹)</label>
-            <input type="number" placeholder="0.00" min="0" step="0.01" value={form.cost_price} onChange={fieldChange('cost_price')}
+            <input type="number" placeholder="0.00" min="0" step="0.01" value={form.cost_price}
+              onChange={e => {
+                const cost = Number(e.target.value) || 0
+                const rate = Number(form.input_gst_rate) || 0
+                const gstAmt = rate && cost ? (cost * rate / 100).toFixed(2) : form.input_gst_amount
+                setForm(prev => ({ ...prev, cost_price: e.target.value, input_gst_amount: gstAmt }))
+                if (errors.cost_price) setErrors(prev => { const n = { ...prev }; delete n.cost_price; return n })
+              }}
               className="w-full px-3 py-2 text-sm font-mono bg-white border border-gray-300 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors" />
           </div>
 
@@ -381,15 +345,28 @@ export default function Inventory() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">GST Rate (%)</label>
-                <select value={form.input_gst_rate} onChange={fieldChange('input_gst_rate')}
+                <select value={form.input_gst_rate} onChange={e => {
+                  const rate = Number(e.target.value) || 0
+                  const cost = Number(form.cost_price) || 0
+                  // Auto-calculate: if cost price is entered, compute GST amount
+                  const gstAmt = rate && cost ? (cost * rate / 100).toFixed(2) : form.input_gst_amount
+                  setForm(prev => ({ ...prev, input_gst_rate: e.target.value, input_gst_amount: gstAmt }))
+                  if (errors.input_gst_rate) setErrors(prev => { const n = { ...prev }; delete n.input_gst_rate; return n })
+                }}
                   className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors">
                   <option value="">Not applicable</option>
                   {[0, 5, 12, 18, 28].map(r => <option key={r} value={r}>{r}%</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">GST Amount (₹)</label>
-                <input type="number" placeholder="0.00" min="0" step="0.01" value={form.input_gst_amount} onChange={fieldChange('input_gst_amount')}
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  GST Amount (₹)
+                  {form.input_gst_rate && form.cost_price && (
+                    <span className="ml-1.5 text-xs text-blue-500 font-normal">auto-calculated</span>
+                  )}
+                </label>
+                <input type="number" placeholder="0.00" min="0" step="0.01" value={form.input_gst_amount}
+                  onChange={e => setForm(prev => ({ ...prev, input_gst_amount: e.target.value }))}
                   className="w-full px-3 py-2 text-sm font-mono bg-white border border-gray-300 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors" />
                 <p className="mt-1 text-xs text-slate-400">ITC credit amount for this product</p>
               </div>
@@ -402,6 +379,25 @@ export default function Inventory() {
           <button onClick={handleSubmit} disabled={createProduct.isPending || updateProduct.isPending}
             className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors duration-150">
             {createProduct.isPending || updateProduct.isPending ? 'Saving…' : editProduct ? 'Save Changes' : 'Add Product'}
+          </button>
+        </div>
+      </Modal>
+
+      {/* Delete Confirmation Modal */}
+      <Modal open={showDeleteModal} onClose={() => setShowDeleteModal(false)} title="Delete Product" size="sm">
+        <p className="text-sm text-slate-600">
+          Are you sure you want to delete <strong>"{deleteTarget?.name}"</strong>?
+          This will also remove any product mappings linked to it.
+        </p>
+        <div className="flex gap-3 mt-6 pt-4 border-t border-gray-100">
+          <button onClick={() => setShowDeleteModal(false)} className="flex-1 px-4 py-2 text-sm font-medium bg-white border border-gray-300 text-slate-700 rounded-md hover:bg-gray-50">Cancel</button>
+          <button
+            onClick={() => {
+              if (deleteTarget) { deleteProduct.mutate(deleteTarget.id); setShowDeleteModal(false); setDeleteTarget(null) }
+            }}
+            disabled={deleteProduct.isPending}
+            className="flex-1 px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50">
+            {deleteProduct.isPending ? 'Deleting…' : 'Delete'}
           </button>
         </div>
       </Modal>

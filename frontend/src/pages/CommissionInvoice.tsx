@@ -5,19 +5,26 @@ import { Upload, FileText, Image, CheckCircle, AlertCircle, X, Percent } from 'l
 import { motion, AnimatePresence } from 'framer-motion'
 import { PageWrapper } from '../components/layout/PageWrapper'
 import { TableSkeleton, EmptyState } from '../components/ui/Skeleton'
+import { DynamicSelect } from '../components/ui/DynamicSelect'
 import { formatINR, formatDate, cn } from '../lib/utils'
 import client from '../api/client'
 import toast from 'react-hot-toast'
 
 const PLATFORM_OPTIONS = [
-  { value: 'amazon', label: 'Amazon', color: '#FF9900' },
-  { value: 'flipkart', label: 'Flipkart', color: '#2874F0' },
-  { value: 'meesho', label: 'Meesho', color: '#F43397' },
-  { value: 'myntra', label: 'Myntra', color: '#FF3F6C' },
-  { value: 'snapdeal', label: 'Snapdeal', color: '#E40046' },
-  { value: 'ajio', label: 'AJIO', color: '#1E1E1E' },
-  { value: 'jiomart', label: 'JioMart', color: '#0059A8' },
-  { value: 'other', label: 'Other', color: '#6B7280' },
+  { value: 'amazon',    label: 'Amazon',          color: '#FF9900' },
+  { value: 'flipkart',  label: 'Flipkart',         color: '#2874F0' },
+  { value: 'meesho',    label: 'Meesho',           color: '#F43397' },
+  { value: 'myntra',    label: 'Myntra',           color: '#FF3F6C' },
+  { value: 'snapdeal',  label: 'Snapdeal',         color: '#E40046' },
+  { value: 'ajio',      label: 'AJIO',             color: '#1E1E1E' },
+  { value: 'jiomart',   label: 'JioMart',          color: '#0059A8' },
+  { value: 'paytm',     label: 'Paytm Mall',       color: '#00BAF2' },
+  { value: 'glowroad',  label: 'GlowRoad',         color: '#E84393' },
+  { value: 'shopsy',    label: 'Shopsy',           color: '#2874F0' },
+  { value: 'direct',    label: 'Direct / Website', color: '#6366F1' },
+  { value: 'offline',   label: 'Offline / Walk-in',color: '#64748B' },
+  { value: 'wholesale', label: 'Wholesale',        color: '#0891B2' },
+  { value: 'other',     label: 'Other',            color: '#6B7280' },
 ]
 
 interface FileItem {
@@ -42,12 +49,20 @@ export default function CommissionInvoice() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['commission-invoices'],
-    queryFn: () => client.get('/commission-invoices').then(r => r.data.data),
+    queryFn: () => client.get('/invoices', { params: { invoice_type: 'commission', per_page: 50 } }).then(r => r.data.data),
   })
 
   const { data: summaryData } = useQuery({
     queryKey: ['commission-invoices', 'summary'],
-    queryFn: () => client.get('/commission-invoices/summary').then(r => r.data.data),
+    queryFn: () => client.get('/invoices', { params: { invoice_type: 'commission', per_page: 200 } }).then(r => {
+      const items = r.data.data?.data ?? []
+      return {
+        total_commission: items.reduce((s: number, i: any) => s + Number(i.tax_amount || 0), 0),
+        total_tds: 0,
+        total_deductions: 0,
+        total_net_settlement: items.reduce((s: number, i: any) => s + Number(i.total_amount || 0), 0),
+      }
+    }),
   })
 
   const onDrop = useCallback((accepted: File[], rejected: FileRejection[]) => {
@@ -94,17 +109,19 @@ export default function CommissionInvoice() {
     if (!form.commission_amount) { toast.error('Commission amount required'); return }
     setSaving(true)
     try {
-      await client.post('/commission-invoices', {
-        ...form,
-        gross_sales: Number(form.gross_sales) || 0,
-        commission_rate: Number(form.commission_rate) || 0,
-        commission_amount: Number(form.commission_amount),
-        tds_amount: Number(form.tds_amount) || 0,
-        tds_rate: Number(form.tds_rate) || 0,
-        other_deductions: Number(form.other_deductions) || 0,
-        net_settlement: Number(form.net_settlement) || 0,
+      await client.post('/invoices/manual', {
+        invoice_number: form.commission_invoice_number,
+        invoice_date: form.invoice_date || null,
+        vendor_name: `${form.platform} Commission`,
+        marketplace: form.platform,
+        invoice_type: 'commission',
+        total_amount: Number(form.commission_amount) + Number(form.tds_amount || 0) + Number(form.other_deductions || 0),
+        tax_amount: Number(form.commission_amount),
+        subtotal: Number(form.gross_sales) || 0,
+        processing_status: 'approved',
+        notes: form.notes,
       })
-      toast.success('Commission recorded → added to Expenses')
+      toast.success('Commission recorded!')
       setForm({ ...EMPTY_MANUAL })
       qc.invalidateQueries({ queryKey: ['commission-invoices'] })
       setActiveTab('list')
@@ -116,7 +133,7 @@ export default function CommissionInvoice() {
   }
 
   const records = data?.data ?? []
-  const summary = summaryData ?? {}
+  const summary: any = summaryData ?? {}
 
   const TAB_STYLE = (t: string) => cn('px-4 py-2 text-sm font-medium border-b-2 transition-colors duration-150',
     activeTab === t ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-700')
@@ -191,15 +208,13 @@ export default function CommissionInvoice() {
           <div className="p-6 max-w-lg">
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate-700 mb-2">Platform</label>
-              <div className="flex flex-wrap gap-2">
-                {PLATFORM_OPTIONS.map(p => (
-                  <button key={p.value} onClick={() => setPlatform(p.value)}
-                    className={cn('text-xs px-3 py-1.5 rounded border font-medium transition-colors', platform === p.value ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-slate-600 hover:bg-gray-50')}
-                    style={platform === p.value ? { borderColor: p.color, color: p.color, background: `${p.color}15` } : {}}>
-                    {p.label}
-                  </button>
-                ))}
-              </div>
+              <DynamicSelect
+                value={platform}
+                onChange={setPlatform}
+                options={PLATFORM_OPTIONS}
+                settingsKey="custom_platforms"
+                chipStyle
+              />
             </div>
 
             <div {...getRootProps()} className={cn('border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all', isDragActive ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-400/60 hover:bg-gray-50')}>
@@ -246,14 +261,13 @@ export default function CommissionInvoice() {
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-slate-700 mb-2">Platform *</label>
-                <div className="flex flex-wrap gap-2">
-                  {PLATFORM_OPTIONS.map(p => (
-                    <button key={p.value} onClick={() => setForm(prev => ({ ...prev, platform: p.value }))}
-                      className={cn('text-xs px-3 py-1.5 rounded border font-medium transition-colors', form.platform === p.value ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-gray-200 text-slate-600 hover:bg-gray-50')}>
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
+                <DynamicSelect
+                  value={form.platform}
+                  onChange={v => setForm(prev => ({ ...prev, platform: v }))}
+                  options={PLATFORM_OPTIONS}
+                  settingsKey="custom_platforms"
+                  chipStyle
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Commission Invoice #</label>
@@ -277,22 +291,45 @@ export default function CommissionInvoice() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Gross Sales (₹)</label>
-                <input type="number" placeholder="0.00" min="0" step="0.01" value={form.gross_sales} onChange={e => setForm(p => ({ ...p, gross_sales: e.target.value }))}
+                <input type="number" placeholder="0.00" min="0" step="0.01" value={form.gross_sales}
+                  onChange={e => {
+                    const gross = Number(e.target.value) || 0
+                    const commRate = Number(form.commission_rate) || 0
+                    const tdsRate = Number(form.tds_rate) || 0
+                    const commAmt = commRate && gross ? (gross * commRate / 100).toFixed(2) : form.commission_amount
+                    const tdsAmt  = tdsRate  && gross ? (gross * tdsRate  / 100).toFixed(2) : form.tds_amount
+                    setForm(p => ({ ...p, gross_sales: e.target.value, commission_amount: commAmt, tds_amount: tdsAmt }))
+                  }}
                   className="w-full px-3 py-2 text-sm font-mono bg-white border border-gray-300 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Commission Rate (%)</label>
-                <input type="number" placeholder="e.g. 15" min="0" max="100" step="0.1" value={form.commission_rate} onChange={e => setForm(p => ({ ...p, commission_rate: e.target.value }))}
+                <input type="number" placeholder="e.g. 15" min="0" max="100" step="0.1" value={form.commission_rate}
+                  onChange={e => {
+                    const rate = Number(e.target.value) || 0
+                    const gross = Number(form.gross_sales) || 0
+                    const commAmt = rate && gross ? (gross * rate / 100).toFixed(2) : form.commission_amount
+                    setForm(p => ({ ...p, commission_rate: e.target.value, commission_amount: commAmt }))
+                  }}
                   className="w-full px-3 py-2 text-sm font-mono bg-white border border-gray-300 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Commission Amount (₹) *</label>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                  Commission Amount (₹) *
+                  {form.commission_rate && form.gross_sales && <span className="ml-1.5 text-xs text-blue-500 font-normal">auto-calculated</span>}
+                </label>
                 <input type="number" placeholder="0.00" min="0" step="0.01" value={form.commission_amount} onChange={e => setForm(p => ({ ...p, commission_amount: e.target.value }))}
                   className="w-full px-3 py-2 text-sm font-mono bg-white border border-gray-300 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">TDS Rate (%)</label>
-                <select value={form.tds_rate} onChange={e => setForm(p => ({ ...p, tds_rate: e.target.value }))}
+                <select value={form.tds_rate}
+                  onChange={e => {
+                    const rate = Number(e.target.value) || 0
+                    const gross = Number(form.gross_sales) || 0
+                    const tdsAmt = rate && gross ? (gross * rate / 100).toFixed(2) : form.tds_amount
+                    setForm(p => ({ ...p, tds_rate: e.target.value, tds_amount: tdsAmt }))
+                  }}
                   className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
                   <option value="0">0% (Not Applicable)</option>
                   <option value="1">1% (TCS - Amazon/Flipkart)</option>

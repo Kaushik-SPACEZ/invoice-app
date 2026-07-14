@@ -12,7 +12,7 @@ import { invoicesApi } from '../api/invoices'
 import client from '../api/client'
 import { PageWrapper } from '../components/layout/PageWrapper'
 import { Button } from '../components/ui/Button'
-import { Select } from '../components/ui/Input'
+import { DynamicSelect } from '../components/ui/DynamicSelect'
 import { StatusBadge, MarketplaceBadge } from '../components/ui/Badge'
 import { TableSkeleton, EmptyState } from '../components/ui/Skeleton'
 import { formatINR, formatDate, cn } from '../lib/utils'
@@ -207,13 +207,15 @@ export default function SalesReturn() {
             </div>
 
             {/* Marketplace selector */}
-            <Select
-              label="Marketplace"
-              options={MARKETPLACE_OPTIONS}
-              value={marketplace}
-              onChange={(e) => setMarketplace(e.target.value)}
-              className="mb-4"
-            />
+            <div className="mb-4">
+              <p className="text-sm font-medium text-slate-700 mb-2">Marketplace</p>
+              <DynamicSelect
+                value={marketplace}
+                onChange={setMarketplace}
+                options={MARKETPLACE_OPTIONS}
+                settingsKey="custom_platforms"
+              />
+            </div>
 
             {/* Drop zone */}
             <div

@@ -10,6 +10,7 @@ const Login = lazy(() => import('./pages/Login'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const UploadInvoice = lazy(() => import('./pages/UploadInvoice'))
 const InvoiceProcessing = lazy(() => import('./pages/InvoiceProcessing'))
+const BulkProcessing = lazy(() => import('./pages/BulkProcessing'))
 const InvoiceReview = lazy(() => import('./pages/InvoiceReview'))
 const InvoiceList = lazy(() => import('./pages/InvoiceList'))
 const InvoiceDetail = lazy(() => import('./pages/InvoiceDetail'))
@@ -52,6 +53,7 @@ export default function App() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/invoices/upload" element={<UploadInvoice />} />
                 <Route path="/invoices/:id/processing" element={<InvoiceProcessing />} />
+                <Route path="/invoices/bulk-processing" element={<BulkProcessing />} />
                 <Route path="/invoices/:id/review" element={<InvoiceReview />} />
                 <Route path="/invoices" element={<InvoiceList />} />
                 <Route path="/invoices/:id" element={<InvoiceDetail />} />

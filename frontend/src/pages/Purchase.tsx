@@ -5,6 +5,7 @@ import { Upload, FileText, Image, CheckCircle, AlertCircle, X, Plus, ShoppingBag
 import { motion, AnimatePresence } from 'framer-motion'
 import { PageWrapper } from '../components/layout/PageWrapper'
 import { Modal } from '../components/ui/Modal'
+import { DynamicSelect } from '../components/ui/DynamicSelect'
 import { TableSkeleton, EmptyState } from '../components/ui/Skeleton'
 import { StatusBadge } from '../components/ui/Badge'
 import { formatINR, formatDate, cn } from '../lib/utils'
@@ -49,6 +50,22 @@ const EMPTY_MANUAL = {
   is_credit_purchase: false, credit_days: '30',
 }
 
+interface PurchaseLineItem {
+  product_name: string
+  sku: string
+  hsn_code: string
+  quantity: string
+  unit_price: string
+  gst_rate: string
+  gst_amount: string
+  total_amount: string
+}
+
+const EMPTY_LINE_ITEM: PurchaseLineItem = {
+  product_name: '', sku: '', hsn_code: '', quantity: '1',
+  unit_price: '', gst_rate: '18', gst_amount: '', total_amount: '',
+}
+
 export default function Purchase() {
   const qc = useQueryClient()
   const [activeTab, setActiveTab] = useState<'list' | 'upload' | 'manual'>('list')
@@ -56,27 +73,62 @@ export default function Purchase() {
   const [vendor, setVendor] = useState('other')
   const [uploading, setUploading] = useState(false)
   const [manualForm, setManualForm] = useState({ ...EMPTY_MANUAL })
+  const [lineItems, setLineItems] = useState<PurchaseLineItem[]>([{ ...EMPTY_LINE_ITEM }])
   const [savingManual, setSavingManual] = useState(false)
-  const [previewId, setPreviewId] = useState<number | null>(null)
+
+  // Fetch products for line item dropdowns
+  const { data: productsData } = useQuery({
+    queryKey: ['products', 'all'],
+    queryFn: () => client.get('/products?per_page=200').then(r => r.data.data?.data ?? []),
+  })
+  const products: any[] = productsData ?? []
+
+  const updateLineItem = (idx: number, field: keyof PurchaseLineItem, value: string) => {
+    setLineItems(prev => prev.map((item, i) => {
+      if (i !== idx) return item
+      const next = { ...item, [field]: value }
+      // Auto-calc GST and total when qty, price, or rate changes
+      const qty  = Number(field === 'quantity'   ? value : next.quantity)   || 0
+      const price = Number(field === 'unit_price' ? value : next.unit_price) || 0
+      const rate  = Number(field === 'gst_rate'   ? value : next.gst_rate)   || 0
+      if (qty > 0 && price > 0) {
+        const taxable = qty * price
+        const gst = Math.round(taxable * rate / 100 * 100) / 100
+        next.gst_amount   = gst.toFixed(2)
+        next.total_amount = (taxable + gst).toFixed(2)
+      }
+      return next
+    }))
+  }
+
+  const addLineItem = () => setLineItems(prev => [...prev, { ...EMPTY_LINE_ITEM }])
+  const removeLineItem = (idx: number) => setLineItems(prev => prev.filter((_, i) => i !== idx))
 
   const { data, isLoading } = useQuery({
     queryKey: ['purchases'],
-    queryFn: () => client.get('/purchases').then(r => r.data.data),
+    queryFn: () => client.get('/invoices', { params: { invoice_type: 'purchase', per_page: 50 } }).then(r => r.data.data),
   })
 
   const { data: summaryData } = useQuery({
     queryKey: ['purchases', 'summary'],
-    queryFn: () => client.get('/purchases/summary').then(r => r.data.data),
+    queryFn: () => client.get('/invoices', { params: { invoice_type: 'purchase', per_page: 200 } }).then(r => {
+      const items = r.data.data?.data ?? []
+      return {
+        total_purchases: items.reduce((s: number, i: any) => s + Number(i.total_amount || 0), 0),
+        total_input_gst: items.reduce((s: number, i: any) => s + Number(i.tax_amount || 0), 0),
+        pending_count: items.filter((i: any) => i.processing_status === 'review' || i.processing_status === 'pending').length,
+      }
+    }),
   })
 
   const approveMutation = useMutation({
-    mutationFn: (id: number) => client.post(`/purchases/${id}/approve`),
+    mutationFn: (id: number) => client.put(`/invoices/${id}/approve`, { validated_data: {} }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchases'] })
       qc.invalidateQueries({ queryKey: ['products'] })
       toast.success('Purchase approved — stock updated!')
     },
-    onError: () => toast.error('Failed to approve purchase'),
+    onError: (err: any) => toast.error(err?.response?.data?.message ?? 'Failed to approve purchase'),
   })
 
   const onDrop = useCallback((accepted: File[], rejected: FileRejection[]) => {
@@ -103,19 +155,20 @@ export default function Purchase() {
         fd.append('file', item.file)
         fd.append('invoice_type', 'purchase')
         fd.append('marketplace', vendor)
-        const { data } = await client.post('/invoices/upload', fd, {
+        const res = await client.post('/invoices/upload', fd, {
           headers: {},
           onUploadProgress: (e) => {
             const pct = e.total ? Math.round((e.loaded / e.total) * 100) : 50
             setFiles(prev => prev.map(f => f.id === item.id ? { ...f, progress: pct } : f))
           },
         })
-        const invoiceId = data.data.invoice_id
+        const invoiceId = res.data?.data?.invoice_id
+        if (!invoiceId) throw new Error(res.data?.message ?? 'No invoice ID returned')
         setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'done', progress: 100, invoiceId } : f))
         qc.invalidateQueries({ queryKey: ['purchases'] })
-      } catch {
+      } catch (err: any) {
         setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'error' } : f))
-        toast.error(`Failed to upload ${item.file.name}`)
+        toast.error(`Upload failed: ${err?.response?.data?.message ?? err?.message ?? 'Unknown error'}`)
       }
     }
     setUploading(false)
@@ -125,22 +178,47 @@ export default function Purchase() {
 
   const handleManualSave = async () => {
     if (!manualForm.vendor_name.trim()) { toast.error('Vendor name required'); return }
-    if (!manualForm.total_amount) { toast.error('Total amount required'); return }
+    const validItems = lineItems.filter(i => i.product_name.trim() && Number(i.quantity) > 0)
+    if (validItems.length === 0) { toast.error('Add at least one product line item'); return }
     setSavingManual(true)
+
+    // Calculate totals from line items
+    const subtotal  = validItems.reduce((s, i) => s + Number(i.quantity) * Number(i.unit_price || 0), 0)
+    const totalGst  = validItems.reduce((s, i) => s + Number(i.gst_amount || 0), 0)
+    const totalAmt  = manualForm.total_amount ? Number(manualForm.total_amount) : subtotal + totalGst
+
     try {
-      await client.post('/purchases', {
-        ...manualForm,
-        total_amount: Number(manualForm.total_amount),
-        tax_amount: Number(manualForm.tax_amount) || 0,
-        input_gst_amount: Number(manualForm.input_gst_amount) || 0,
-        input_gst_rate: Number(manualForm.input_gst_rate) || 0,
+      await client.post('/invoices/manual', {
+        vendor_name: manualForm.vendor_name,
+        vendor_gstin: manualForm.vendor_gstin,
+        invoice_number: manualForm.invoice_number,
+        invoice_date: manualForm.invoice_date || null,
+        marketplace: manualForm.vendor_type,
         invoice_type: 'purchase',
+        total_amount: totalAmt,
+        tax_amount: totalGst || Number(manualForm.input_gst_amount) || 0,
+        subtotal: subtotal || (totalAmt - (totalGst || Number(manualForm.input_gst_amount) || 0)),
+        processing_status: 'approved',
+        notes: manualForm.notes,
         is_credit_purchase: manualForm.is_credit_purchase,
         credit_days: manualForm.is_credit_purchase ? Number(manualForm.credit_days) : 0,
+        line_items: validItems.map(i => ({
+          product_name: i.product_name,
+          sku: i.sku || null,
+          hsn_code: i.hsn_code || null,
+          quantity: Number(i.quantity),
+          unit_price: Number(i.unit_price) || 0,
+          taxable_value: Number(i.quantity) * Number(i.unit_price || 0),
+          igst_rate: Number(i.gst_rate) || 0,
+          igst_amount: Number(i.gst_amount) || 0,
+          total_amount: Number(i.total_amount) || 0,
+        })),
       })
       toast.success('Purchase recorded!')
       setManualForm({ ...EMPTY_MANUAL })
+      setLineItems([{ ...EMPTY_LINE_ITEM }])
       qc.invalidateQueries({ queryKey: ['purchases'] })
+      qc.invalidateQueries({ queryKey: ['invoices'] })
       setActiveTab('list')
     } catch (err: any) {
       toast.error(err?.response?.data?.message ?? 'Failed to save purchase')
@@ -150,7 +228,7 @@ export default function Purchase() {
   }
 
   const purchases: PurchaseInvoice[] = data?.data ?? []
-  const summary = summaryData ?? {}
+  const summary: any = summaryData ?? {}
 
   const TAB_STYLE = (t: string) => cn(
     'px-4 py-2 text-sm font-medium border-b-2 transition-colors duration-150',
@@ -240,10 +318,12 @@ export default function Purchase() {
           <div className="p-6 max-w-xl">
             <div className="mb-4">
               <label className="block text-sm font-medium text-slate-700 mb-1.5">Vendor / Supplier Type</label>
-              <select value={vendor} onChange={e => setVendor(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
-                {VENDOR_TYPES.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
-              </select>
+              <DynamicSelect
+                value={vendor}
+                onChange={setVendor}
+                options={VENDOR_TYPES}
+                settingsKey="custom_vendor_types"
+              />
             </div>
 
             <div {...getRootProps()} className={cn('border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all duration-200',
@@ -324,25 +404,153 @@ export default function Purchase() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Vendor Type</label>
-                <select value={manualForm.vendor_type} onChange={e => setManualForm(p => ({ ...p, vendor_type: e.target.value }))}
-                  className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
-                  {VENDOR_TYPES.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
-                </select>
+                <DynamicSelect
+                  value={manualForm.vendor_type}
+                  onChange={v => setManualForm(p => ({ ...p, vendor_type: v }))}
+                  options={VENDOR_TYPES}
+                  settingsKey="custom_vendor_types"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1.5">Total Amount (₹) *</label>
                 <input type="number" placeholder="0.00" min="0" step="0.01" value={manualForm.total_amount}
-                  onChange={e => setManualForm(p => ({ ...p, total_amount: e.target.value }))}
+                  onChange={e => {
+                    const total = Number(e.target.value) || 0
+                    const rate = Number(manualForm.input_gst_rate) || 0
+                    const gstAmt = rate && total ? (total * rate / (100 + rate)).toFixed(2) : manualForm.input_gst_amount
+                    setManualForm(p => ({ ...p, total_amount: e.target.value, input_gst_amount: gstAmt }))
+                  }}
                   className="w-full px-3 py-2 text-sm font-mono bg-white border border-gray-300 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
               </div>
 
               {/* Input GST */}
               <div className="col-span-2 border-t border-gray-100 pt-4">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Input GST (ITC Claim)</p>
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Products Purchased *</p>
+                  <button type="button" onClick={addLineItem}
+                    className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1 px-2 py-1 rounded border border-blue-200 hover:bg-blue-50">
+                    <Plus size={11} /> Add Product
+                  </button>
+                </div>
+
+                {/* Line items */}
+                <div className="space-y-3">
+                  {lineItems.map((item, idx) => (
+                    <div key={idx} className="bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-2">
+                      {/* Row 1: Product name + SKU + HSN */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="col-span-1">
+                          <label className="text-xs text-slate-500 mb-0.5 block">Product Name *</label>
+                          <input
+                            type="text" list={`products-${idx}`} placeholder="Type or select…"
+                            value={item.product_name}
+                            onChange={e => {
+                              updateLineItem(idx, 'product_name', e.target.value)
+                              // Auto-fill SKU/HSN from inventory if product selected
+                              const match = products.find(p => p.name === e.target.value || p.sku === e.target.value)
+                              if (match) {
+                                setLineItems(prev => prev.map((li, i) => i === idx ? {
+                                  ...li, product_name: match.name, sku: match.sku ?? li.sku,
+                                  hsn_code: match.hsn_code ?? li.hsn_code,
+                                  unit_price: li.unit_price || String(match.cost_price ?? ''),
+                                } : li))
+                              }
+                            }}
+                            className="w-full px-2 py-1.5 text-xs bg-white border border-gray-300 rounded-md text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500"
+                          />
+                          <datalist id={`products-${idx}`}>
+                            {products.map(p => <option key={p.id} value={p.name}>{p.sku} — {p.name}</option>)}
+                          </datalist>
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 mb-0.5 block">SKU</label>
+                          <input type="text" placeholder="e.g. 25352" value={item.sku}
+                            onChange={e => updateLineItem(idx, 'sku', e.target.value)}
+                            className="w-full px-2 py-1.5 text-xs font-mono bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 mb-0.5 block">HSN Code</label>
+                          <input type="text" placeholder="e.g. 610910" value={item.hsn_code}
+                            onChange={e => updateLineItem(idx, 'hsn_code', e.target.value)}
+                            className="w-full px-2 py-1.5 text-xs font-mono bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500" />
+                        </div>
+                      </div>
+                      {/* Row 2: Qty + Unit Price + GST Rate + GST Amt + Total + Delete */}
+                      <div className="grid grid-cols-5 gap-2 items-end">
+                        <div>
+                          <label className="text-xs text-slate-500 mb-0.5 block">Qty *</label>
+                          <input type="number" min="0.001" step="0.001" placeholder="1" value={item.quantity}
+                            onChange={e => updateLineItem(idx, 'quantity', e.target.value)}
+                            className="w-full px-2 py-1.5 text-xs font-mono bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 mb-0.5 block">Unit Price (₹) *</label>
+                          <input type="number" min="0" step="0.01" placeholder="0.00" value={item.unit_price}
+                            onChange={e => updateLineItem(idx, 'unit_price', e.target.value)}
+                            className="w-full px-2 py-1.5 text-xs font-mono bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 mb-0.5 block">GST %</label>
+                          <select value={item.gst_rate} onChange={e => updateLineItem(idx, 'gst_rate', e.target.value)}
+                            className="w-full px-2 py-1.5 text-xs bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500">
+                            {[0,5,12,18,28].map(r => <option key={r} value={r}>{r}%</option>)}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 mb-0.5 block">
+                            GST (₹) <span className="text-blue-400">auto</span>
+                          </label>
+                          <input type="number" min="0" step="0.01" value={item.gst_amount}
+                            onChange={e => updateLineItem(idx, 'gst_amount', e.target.value)}
+                            className="w-full px-2 py-1.5 text-xs font-mono bg-blue-50 border border-blue-200 rounded-md text-slate-700 focus:outline-none focus:border-blue-500" />
+                        </div>
+                        <div className="flex items-end gap-1">
+                          <div className="flex-1">
+                            <label className="text-xs text-slate-500 mb-0.5 block">Total (₹)</label>
+                            <input type="number" readOnly value={item.total_amount}
+                              className="w-full px-2 py-1.5 text-xs font-mono bg-slate-50 border border-gray-200 rounded-md text-slate-700 cursor-default" />
+                          </div>
+                          {lineItems.length > 1 && (
+                            <button type="button" onClick={() => removeLineItem(idx)}
+                              className="mb-0.5 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors flex-shrink-0">
+                              <X size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Running totals from line items */}
+                {lineItems.some(i => i.total_amount) && (
+                  <div className="mt-3 flex justify-end gap-6 text-xs text-slate-500">
+                    <span>Subtotal: <strong className="text-slate-800 font-mono">
+                      ₹{lineItems.reduce((s,i) => s + Number(i.quantity||0)*Number(i.unit_price||0), 0).toLocaleString('en-IN', {minimumFractionDigits:2})}
+                    </strong></span>
+                    <span>GST: <strong className="text-emerald-600 font-mono">
+                      ₹{lineItems.reduce((s,i) => s + Number(i.gst_amount||0), 0).toLocaleString('en-IN', {minimumFractionDigits:2})}
+                    </strong></span>
+                    <span>Total: <strong className="text-slate-800 font-mono font-semibold">
+                      ₹{lineItems.reduce((s,i) => s + Number(i.total_amount||0), 0).toLocaleString('en-IN', {minimumFractionDigits:2})}
+                    </strong></span>
+                  </div>
+                )}
+              </div>
+
+              {/* Overall total override (optional) */}
+              <div className="col-span-2 border-t border-gray-100 pt-4">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Invoice Summary (optional override)</p>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1.5">GST Rate (%)</label>
-                    <select value={manualForm.input_gst_rate} onChange={e => setManualForm(p => ({ ...p, input_gst_rate: e.target.value }))}
+                    <select value={manualForm.input_gst_rate} onChange={e => {
+                      const rate = e.target.value
+                      const total = Number(manualForm.total_amount) || 0
+                      // Auto-calculate GST amount: total = taxable × (1 + rate/100), so gst = total × rate / (100 + rate)
+                      const gstAmt = rate && total ? (total * Number(rate) / (100 + Number(rate))).toFixed(2) : manualForm.input_gst_amount
+                      setManualForm(p => ({ ...p, input_gst_rate: rate, input_gst_amount: gstAmt }))
+                    }}
                       className="w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-md text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
                       {[0, 5, 12, 18, 28].map(r => <option key={r} value={r}>{r}%</option>)}
                     </select>
